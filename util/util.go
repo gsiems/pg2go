@@ -44,15 +44,8 @@ func Lpad(s string, l int) string {
 
 func ToNullVarType(pgV string) string {
 
-	//type NullBool
-	//type NullFloat64
-	//type NullInt32
-	//type NullInt64
-	//type NullString
-	//type NullTime
-
 	switch pgV {
-	case "date", "time":
+	case "date", "time", "interval":
 		return "sql.NullTime"
 
 	case "boolean":
@@ -63,6 +56,9 @@ func ToNullVarType(pgV string) string {
 
 	case "bigint":
 		return "sql.NullInt64"
+
+	case "float4", "float8", "numeric", "money":
+		return "sql.NullFloat"
 
 	}
 
@@ -76,8 +72,8 @@ func ToNullVarType(pgV string) string {
 func ToGoVarType(pgV string) string {
 
 	switch pgV {
-	case "date", "time":
-		return "Time"
+	case "date", "time", "interval":
+		return "time.Time"
 
 	case "boolean":
 		return "bool"
@@ -88,10 +84,16 @@ func ToGoVarType(pgV string) string {
 	case "bigint":
 		return "int64"
 
+	case "float4":
+		return "float32"
+
+	case "float8", "numeric", "money":
+		return "float64"
+
 	}
 
 	if strings.Contains(pgV, "timestamp") {
-		return "Time"
+		return "time.Time"
 	}
 
 	return "string"
