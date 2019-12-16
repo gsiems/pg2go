@@ -20,6 +20,7 @@ type cArgs struct {
 	appUser      string
 	dbName       string
 	dbHost       string
+	dbPort       string
 	dbUser       string
 }
 
@@ -40,6 +41,7 @@ func main() {
 
 	flag.StringVar(&args.dbName, "d", "", "The the database name to connect to.")
 	flag.StringVar(&args.dbHost, "h", "", "The database host to connect to.")
+	flag.StringVar(&args.dbPort, "p", "5432", "The port to connect on.")
 	flag.StringVar(&args.dbUser, "U", "", "The database user to connect as.")
 
 	flag.Parse()
@@ -56,7 +58,7 @@ func main() {
 		flag.PrintDefaults()
 	}
 
-	connStr := fmt.Sprintf("user=%s dbname=%s host=%s", args.dbUser, args.dbName, args.dbHost)
+	connStr := fmt.Sprintf("user=%s dbname=%s host=%s port=%s", args.dbUser, args.dbName, args.dbHost, args.dbPort)
 
 	genHeader(args)
 
