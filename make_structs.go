@@ -178,11 +178,23 @@ func genTableStructs(args cArgs, d []m.PgTableMetadata) {
 
 func genFunctionStructs(args cArgs, d []m.PgFunctionMetadata) {
 
+	// If no app user was specified then we can potentially get
+	// duplicate structures. It is also possible to have duplicated
+	// structures if there is functional overloading in the database.
+	seen := make(map[string]int)
+
 	for _, f := range d {
 
 		if len(f.ResultColumns) == 0 {
 			continue
 		}
+
+		// ensure the structure has not been generated already
+		_, ok := seen[f.StructName]
+		if ok {
+			continue
+		}
+		seen[f.StructName] = 1
 
 		fmt.Println()
 		fmt.Printf("// %s struct for the result set from the %s.%s function\n", f.StructName, f.SchemaName, f.ObjName)
