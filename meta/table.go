@@ -52,9 +52,9 @@ func GetTableMetas(connStr, schema, objName, user string) (tables []PgTableMetad
 func listTableMetas(db *DB, schema, objName, user string) (d []PgTableMetadata, err error) {
 	err = db.Select(&d, `
 WITH args AS (
-    SELECT coalesce ( $1, '' ) AS schema_name,
-            coalesce ( $2, '' ) AS obj_name,
-            coalesce ( $3, '' ) AS username
+    SELECT $1 AS schema_name,
+            regexp_split_to_table ( $2, ', *' ) AS obj_name,
+            $3 AS username
 ),
 obj AS (
     SELECT n.nspname::text AS schema_name,
@@ -94,10 +94,10 @@ SELECT obj.schema_name,
         coalesce ( obj.description, '' ) AS description
     FROM obj
     CROSS JOIN args
-    WHERE ( obj.obj_name LIKE args.obj_name || '=%'
-            OR args.obj_name = '' )
-        AND ( obj.acl::text LIKE args.obj_name || '=%'
-            OR args.obj_name = '' )
+    WHERE ( obj.obj_name = args.obj_name
+            OR coalesce ( args.obj_name, '' ) = '' )
+        AND ( obj.acl::text LIKE args.username || '=%'
+            OR args.username = '' )
         AND ( obj.acl::text NOT LIKE 'postgres=%' )
     ORDER BY obj.schema_name,
         obj.obj_name,
@@ -106,59 +106,12 @@ SELECT obj.schema_name,
 	return
 }
 
-/*
-WITH obj AS (
-    SELECT n.nspname::text AS schema_name,
-            c.relname::text AS obj_name,
-            c.relkind::text AS obj_kind,
-            CASE c.relkind
-                WHEN 'r' THEN 'table'
-                WHEN 'v' THEN 'view'
-                WHEN 'm' THEN 'materialized view'
-                WHEN 'i' THEN 'index'
-                WHEN 'S' THEN 'sequence'
-                WHEN 's' THEN 'special'
-                WHEN 'f' THEN 'foreign table'
-                WHEN 'p' THEN 'table'
-                END AS obj_type,
-            pg_catalog.obj_description(c.oid, 'pg_class') AS description,
-            unnest ( c.relacl ) AS acl
-        FROM pg_catalog.pg_class c
-        LEFT JOIN pg_catalog.pg_namespace n
-            ON n.oid = c.relnamespace
-        WHERE c.relkind IN ( 'r', 'v', 'm', 'S', 's', 'f', 'p', '' )
-            AND pg_catalog.pg_table_is_visible ( c.oid )
-            AND n.nspname <> 'pg_catalog'
-            AND n.nspname <> 'information_schema'
-            AND n.nspname !~ '^pg_toast'
-            AND ( n.nspname = 'tasker'
-                OR coalesce ( 'tasker', '' ) = '' )
-)
--- when no user is specified then we get portential duplicates based on
--- how many users have privs to the object
-SELECT schema_name,
-        obj_name,
-        obj_kind,
-        obj_type,
-        regexp_replace ( regexp_replace ( acl::text, '^[^=]+=', '' ), '[/].+', '' ) AS privs,
-        coalesce ( description, '' ) AS description
-    FROM obj
-    WHERE ( obj_name LIKE '' || '=%'
-            OR coalesce ( '', '' ) = '' )
-        AND ( acl::text LIKE 'tasker_user' || '=%'
-            OR coalesce ( 'tasker_user', '' ) = '' )
-        AND ( acl::text NOT LIKE 'postgres=%' )
-    ORDER BY schema_name,
-        obj_name,
-        obj_type ;
-*/
-
 // listTableColumnMetas returns the metadata for the avaiable table/view columns
 func listTableColumnMetas(db *DB, schema, objName string) (d []PgColumnMetadata, err error) {
 	err = db.Select(&d, `
 WITH args AS (
-    SELECT coalesce ( $1, '' ) AS schema_name,
-            coalesce ( $2, '' ) AS obj_name
+    SELECT $1 AS schema_name,
+            $2 AS obj_name
 ),
 cols AS (
     SELECT n.nspname::text AS schema_name,
