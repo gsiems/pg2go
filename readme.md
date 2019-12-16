@@ -44,7 +44,7 @@ The make_structs utility generates structures for tables, views, user defined ty
   | -t        | Generate structs for user defined composite types. |
   | -f        | Generate structs for result-set returning functions. |
   | -n        | Use null datatypes in structures.               |
-  | -o string | The name of the database object to generate a struct for (defaults to all). |
+  | -o string | The comma-separated list of the database objects to generate a structs for (defaults to all). |
   | -s string | The database schema to generate structs for (defaults to all). |
   | -u string | The name of the application user. If specified then only structs for those objects that the user has privileges for will be generated. |
 

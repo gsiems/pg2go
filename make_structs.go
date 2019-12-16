@@ -33,7 +33,7 @@ func main() {
 	flag.BoolVar(&args.useNullTypes, "n", false, "Use null datatypes in structures.")
 
 	flag.StringVar(&args.schemaName, "s", "", "The database schema to generate structs for (defaults to all).")
-	flag.StringVar(&args.objName, "o", "", "The name of the database object to generate a struct for (defaults to all).")
+	flag.StringVar(&args.objName, "o", "", "The comma-separated list of the database objects to generate a structs for (defaults to all).")
 	flag.StringVar(&args.appUser, "u", "", "The name of the application user. If specified then only structs for those objects that the user has privileges for will be generated.")
 
 	flag.StringVar(&args.dbName, "d", "", "The the database name to connect to.")
