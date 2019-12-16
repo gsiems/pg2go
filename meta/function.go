@@ -83,9 +83,9 @@ func getResultColumns(f PgFunctionMetadata) (c []PgColumnMetadata) {
 func listFunctionMetas(db *DB, schema, objName, user string) (d []PgFunctionMetadata, err error) {
 	err = db.Select(&d, `
 WITH args AS (
-    SELECT coalesce ( $1, '' ) AS schema_name,
-            coalesce ( $2, '' ) AS obj_name,
-            coalesce ( $3, '' ) AS username
+    SELECT $1 AS schema_name,
+            regexp_split_to_table ( $2, ', *' ) AS obj_name,
+            $3 AS username
 ),
 obj AS (
     SELECT n.nspname::text AS schema_name,
@@ -107,7 +107,7 @@ obj AS (
             AND ( n.nspname = args.schema_name
                 OR args.schema_name = '' )
             AND ( p.proname = args.obj_name
-                OR args.obj_name = '' )
+                OR coalesce ( args.obj_name, '' ) = '' )
 )
 SELECT obj.schema_name,
         obj.obj_name,
