@@ -29,9 +29,9 @@ Postgresql databases from Go.
 
 ## Tools
 
-So far, only make_structs.
+So far, only pg2struct.
 
-### make_structs
+### pg2struct
 
 The make_structs utility generates structures for tables, views, user defined types, and set-returning functions.
 
