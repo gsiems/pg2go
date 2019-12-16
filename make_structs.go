@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	m "github.com/gsiems/pg2go/meta"
-	u "github.com/gsiems/pg2go/util"
 )
 
 type cArgs struct {
@@ -140,7 +139,7 @@ func genTypeStructs(args cArgs, d []m.PgUsertypeMetadata) {
 		}
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(getStanzas(args, f.Columns))
+		fmt.Print(m.GetStructStanzas(args.useNullTypes, f.Columns))
 
 		fmt.Println("}")
 	}
@@ -171,7 +170,7 @@ func genTableStructs(args cArgs, d []m.PgTableMetadata) {
 		}
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(getStanzas(args, f.Columns))
+		fmt.Print(m.GetStructStanzas(args.useNullTypes, f.Columns))
 
 		fmt.Println("}")
 	}
@@ -193,85 +192,8 @@ func genFunctionStructs(args cArgs, d []m.PgFunctionMetadata) {
 
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(getStanzas(args, f.ResultColumns))
+		fmt.Print(m.GetStructStanzas(args.useNullTypes, f.ResultColumns))
 
 		fmt.Println("}")
 	}
-}
-
-func getStanzas(args cArgs, cols []m.PgColumnMetadata) string {
-
-	var ary []string
-	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(args, cols)
-
-	for _, col := range cols {
-		stanza := makeStanza(args, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
-		ary = append(ary, stanza)
-	}
-	return strings.Join(ary, "")
-}
-
-func makeStanza(args cArgs, col m.PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
-
-	var ary []string
-
-	goVarName := u.ToUpperCamelCase(col.ColumnName)
-	jsonName := u.ToLowerCamelCase(col.ColumnName)
-
-	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
-	VarTypeToken := ""
-	if args.useNullTypes {
-		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
-	} else {
-		VarTypeToken = u.Lpad(u.ToGoVarType(col.DataType), maxVarTypeLen+1)
-	}
-
-	JSONToken := u.Lpad("`json:\""+jsonName+"\"", maxVarNameLen+9)
-	DbToken := u.Lpad("db:\""+col.ColumnName+"\"`", maxDbNameLen+6)
-
-	ary = append(ary, "\t")
-	ary = append(ary, VarNameToken)
-	ary = append(ary, VarTypeToken)
-	ary = append(ary, JSONToken)
-	ary = append(ary, DbToken)
-	ary = append(ary, " // [")
-	ary = append(ary, col.DataType)
-	ary = append(ary, "]")
-
-	if col.IsPk {
-		ary = append(ary, " [PK]")
-	}
-	if col.IsRequired {
-		ary = append(ary, " [Not Null]")
-	}
-
-	if col.Description != "" {
-		ary = append(ary, fmt.Sprintf(" %s", strings.ReplaceAll(col.Description, "\n", "\n//                                           ")))
-	}
-	ary = append(ary, "\n")
-
-	return strings.Join(ary, "")
-}
-
-func getMaxLens(args cArgs, cols []m.PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int) {
-	for _, col := range cols {
-		goVarName := u.ToUpperCamelCase(col.ColumnName)
-		maxDbNameLen = maxStringLen(col.ColumnName, maxDbNameLen)
-		maxVarNameLen = maxStringLen(goVarName, maxVarNameLen)
-
-		if args.useNullTypes {
-			maxVarTypeLen = maxStringLen(u.ToNullVarType(col.DataType), maxVarTypeLen)
-		} else {
-			maxVarTypeLen = maxStringLen(u.ToGoVarType(col.DataType), maxVarTypeLen)
-		}
-
-	}
-	return
-}
-
-func maxStringLen(s string, sz int) int {
-	if len(s) > sz {
-		return len(s)
-	}
-	return sz
 }
