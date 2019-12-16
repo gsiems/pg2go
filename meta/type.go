@@ -50,8 +50,8 @@ func listTypeMetas(db *DB, schema, objName string) (d []PgUsertypeMetadata, err 
 
 	err = db.Select(&d, `
 WITH args AS (
-    SELECT coalesce ( $1, '' ) AS schema_name,
-            coalesce ( $2, '' ) AS obj_name
+    SELECT $1 AS schema_name,
+            regexp_split_to_table ( $2, ', *' ) AS obj_name
 )
 SELECT n.nspname::text AS schema_name,
         pg_catalog.format_type ( t.oid, NULL ) AS obj_name,
@@ -80,7 +80,7 @@ SELECT n.nspname::text AS schema_name,
         AND ( n.nspname = args.schema_name
             OR args.schema_name = '' )
         AND ( pg_catalog.format_type ( t.oid, NULL ) = args.obj_name
-            OR args.obj_name = '' )
+            OR coalesce ( args.obj_name, '' ) = '' )
     ORDER BY n.nspname,
         pg_catalog.format_type ( t.oid, NULL )
 `, schema, objName)
@@ -92,8 +92,8 @@ func listTypeColumnMetas(db *DB, schema, objName string) (d []PgColumnMetadata, 
 
 	err = db.Select(&d, `
 WITH args AS (
-    SELECT coalesce ( $1, '' ) AS schema_name,
-            coalesce ( $2, '' ) AS obj_name
+    SELECT $1 AS schema_name,
+            $2 AS obj_name
 ),
 cols AS (
     SELECT n.nspname::text AS schema_name,
