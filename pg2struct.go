@@ -14,6 +14,7 @@ type cArgs struct {
 	genTypes     bool
 	genFuncs     bool
 	useNullTypes bool
+	packageName  string
 	schemaName   string
 	objName      string
 	appUser      string
@@ -31,6 +32,7 @@ func main() {
 	flag.BoolVar(&args.genFuncs, "f", false, "Generate structs for result-set returning functions.")
 
 	flag.BoolVar(&args.useNullTypes, "n", false, "Use null datatypes in structures.")
+	flag.StringVar(&args.packageName, "package", "main", "The package name (defaults to main).")
 
 	flag.StringVar(&args.schemaName, "s", "", "The database schema to generate structs for (defaults to all).")
 	flag.StringVar(&args.objName, "o", "", "The comma-separated list of the database objects to generate a structs for (defaults to all).")
@@ -84,7 +86,7 @@ func main() {
 }
 
 func genHeader(args cArgs) {
-	fmt.Println("package main")
+	fmt.Printf("package %s\n", args.packageName)
 	fmt.Println()
 
 	fmt.Println("// Postgresql structs generated for the following:")
