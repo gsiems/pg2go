@@ -117,7 +117,7 @@ func genHeader(args cArgs) {
 	fmt.Println()
 	fmt.Println("import (")
 	if args.useNullTypes {
-		fmt.Println("\t\"sql\"")
+		fmt.Println("\t\"database/sql\"")
 	} else {
 		fmt.Println("\t\"time\"")
 	}
