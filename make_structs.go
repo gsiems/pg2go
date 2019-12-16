@@ -43,19 +43,21 @@ func main() {
 
 	flag.Parse()
 
-	genHeader(args)
-
 	if !args.genTypes && !args.genRels && !args.genFuncs {
 		fmt.Println("No structure types specified. Select some combination of table, type, and function structures to generate.")
-		flag.PrintDefaults()
 	}
 
 	if args.dbUser == "" || args.dbName == "" || args.dbHost == "" {
 		fmt.Println("Insufficient connections parameters specified. Specify the user, host, and database to connect to.")
+	}
+
+	if (!args.genTypes && !args.genRels && !args.genFuncs) || args.dbUser == "" || args.dbName == "" || args.dbHost == "" {
 		flag.PrintDefaults()
 	}
 
 	connStr := fmt.Sprintf("user=%s dbname=%s host=%s", args.dbUser, args.dbName, args.dbHost)
+
+	genHeader(args)
 
 	if args.genTypes {
 		types, err := m.GetTypeMetas(connStr, args.schemaName, args.objName, args.appUser)
@@ -115,7 +117,7 @@ func genHeader(args cArgs) {
 	fmt.Println()
 	fmt.Println("import (")
 	if args.useNullTypes {
-		fmt.Println("\tnull \"gopkg.in/guregu/null.v3\"")
+		fmt.Println("\t\"sql\"")
 	} else {
 		fmt.Println("\t\"time\"")
 	}
