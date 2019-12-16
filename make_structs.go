@@ -11,15 +11,16 @@ import (
 )
 
 type cArgs struct {
-	genRels    bool
-	genTypes   bool
-	genFuncs   bool
-	schemaName string
-	objName    string
-	appUser    string
-	dbName     string
-	dbHost     string
-	dbUser     string
+	genRels      bool
+	genTypes     bool
+	genFuncs     bool
+	useNullTypes bool
+	schemaName   string
+	objName      string
+	appUser      string
+	dbName       string
+	dbHost       string
+	dbUser       string
 }
 
 func main() {
@@ -29,6 +30,8 @@ func main() {
 	flag.BoolVar(&args.genRels, "r", false, "Generate structs for tables and views.")
 	flag.BoolVar(&args.genTypes, "t", false, "Generate structs for user defined types.")
 	flag.BoolVar(&args.genFuncs, "f", false, "Generate structs for result-set returning functions.")
+
+	flag.BoolVar(&args.useNullTypes, "n", false, "Use null datatypes in structures.")
 
 	flag.StringVar(&args.schemaName, "s", "", "The database schema to generate structs for (defaults to all).")
 	flag.StringVar(&args.objName, "o", "", "The name of the database object to generate a struct for (defaults to all).")
@@ -59,7 +62,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("FAILED! %q.\n", err)
 		}
-		genTypeStructs(types)
+		genTypeStructs(args, types)
 	}
 
 	if args.genRels {
@@ -67,7 +70,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("FAILED! %q.\n", err)
 		}
-		genTableStructs(tables)
+		genTableStructs(args, tables)
 	}
 
 	if args.genFuncs {
@@ -75,7 +78,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("FAILED! %q.\n", err)
 		}
-		genFunctionStructs(funcs)
+		genFunctionStructs(args, funcs)
 	}
 }
 
@@ -111,11 +114,16 @@ func genHeader(args cArgs) {
 
 	fmt.Println()
 	fmt.Println("import (")
-	fmt.Println("\tnull \"gopkg.in/guregu/null.v3\"")
+	if args.useNullTypes {
+		fmt.Println("\tnull \"gopkg.in/guregu/null.v3\"")
+	} else {
+		fmt.Println("\t\"time\"")
+	}
 	fmt.Println(")")
+
 }
 
-func genTypeStructs(d []m.PgUsertypeMetadata) {
+func genTypeStructs(args cArgs, d []m.PgUsertypeMetadata) {
 
 	for _, f := range d {
 
@@ -130,13 +138,13 @@ func genTypeStructs(d []m.PgUsertypeMetadata) {
 		}
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(getStanzas(f.Columns))
+		fmt.Print(getStanzas(args, f.Columns))
 
 		fmt.Println("}")
 	}
 }
 
-func genTableStructs(d []m.PgTableMetadata) {
+func genTableStructs(args cArgs, d []m.PgTableMetadata) {
 
 	// If no app user was specified then we can potentially get dulplicate structures
 	seen := make(map[string]int)
@@ -161,13 +169,13 @@ func genTableStructs(d []m.PgTableMetadata) {
 		}
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(getStanzas(f.Columns))
+		fmt.Print(getStanzas(args, f.Columns))
 
 		fmt.Println("}")
 	}
 }
 
-func genFunctionStructs(d []m.PgFunctionMetadata) {
+func genFunctionStructs(args cArgs, d []m.PgFunctionMetadata) {
 
 	for _, f := range d {
 
@@ -183,35 +191,25 @@ func genFunctionStructs(d []m.PgFunctionMetadata) {
 
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(getStanzas(f.ResultColumns))
+		fmt.Print(getStanzas(args, f.ResultColumns))
 
 		fmt.Println("}")
 	}
 }
 
-func getMaxLens(cols []m.PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int) {
-	for _, col := range cols {
-		goVarName := u.ToUpperCamelCase(col.ColumnName)
-		maxDbNameLen = maxStringLen(col.ColumnName, maxDbNameLen)
-		maxVarNameLen = maxStringLen(goVarName, maxVarNameLen)
-		maxVarTypeLen = maxStringLen(u.ToNullVarType(col.DataType), maxVarTypeLen)
-	}
-	return
-}
-
-func getStanzas(cols []m.PgColumnMetadata) string {
+func getStanzas(args cArgs, cols []m.PgColumnMetadata) string {
 
 	var ary []string
-	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(cols)
+	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(args, cols)
 
 	for _, col := range cols {
-		stanza := makeStanza(col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+		stanza := makeStanza(args, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
 		ary = append(ary, stanza)
 	}
 	return strings.Join(ary, "")
 }
 
-func makeStanza(col m.PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
+func makeStanza(args cArgs, col m.PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
 
 	var ary []string
 
@@ -219,7 +217,13 @@ func makeStanza(col m.PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeL
 	jsonName := u.ToLowerCamelCase(col.ColumnName)
 
 	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
-	VarTypeToken := u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
+	VarTypeToken := ""
+	if args.useNullTypes {
+		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
+	} else {
+		VarTypeToken = u.Lpad(u.ToGoVarType(col.DataType), maxVarTypeLen+1)
+	}
+
 	JSONToken := u.Lpad("`json:\""+jsonName+"\"", maxVarNameLen+9)
 	DbToken := u.Lpad("db:\""+col.ColumnName+"\"`", maxDbNameLen+6)
 
@@ -245,6 +249,22 @@ func makeStanza(col m.PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeL
 	ary = append(ary, "\n")
 
 	return strings.Join(ary, "")
+}
+
+func getMaxLens(args cArgs, cols []m.PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int) {
+	for _, col := range cols {
+		goVarName := u.ToUpperCamelCase(col.ColumnName)
+		maxDbNameLen = maxStringLen(col.ColumnName, maxDbNameLen)
+		maxVarNameLen = maxStringLen(goVarName, maxVarNameLen)
+
+		if args.useNullTypes {
+			maxVarTypeLen = maxStringLen(u.ToNullVarType(col.DataType), maxVarTypeLen)
+		} else {
+			maxVarTypeLen = maxStringLen(u.ToGoVarType(col.DataType), maxVarTypeLen)
+		}
+
+	}
+	return
 }
 
 func maxStringLen(s string, sz int) int {

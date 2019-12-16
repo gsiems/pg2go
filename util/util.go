@@ -62,3 +62,23 @@ func ToNullVarType(pgV string) string {
 
 	return "null.String"
 }
+
+func ToGoVarType(pgV string) string {
+
+	switch pgV {
+	case "date":
+		return "Time"
+
+	case "boolean":
+		return "bool"
+
+	case "int", "smallint", "integer", "bigint":
+		return "int"
+	}
+
+	if strings.Contains(pgV, "timestamp") {
+		return "Time"
+	}
+
+	return "string"
+}
