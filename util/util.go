@@ -69,6 +69,36 @@ func ToNullVarType(pgV string) string {
 	return "sql.NullString"
 }
 
+func ToIntVarType(pgV string) string {
+
+	switch pgV {
+	case "date", "time", "interval":
+		return "Time"
+
+	case "boolean":
+		return "Bool"
+
+	case "int", "smallint", "integer":
+		return "Int32"
+
+	case "bigint":
+		return "Int64"
+
+	case "float8", "numeric", "money":
+		return "Float64"
+
+	case "float4":
+		return "Float32"
+
+	}
+
+	if strings.Contains(pgV, "timestamp") {
+		return "Time"
+	}
+
+	return "String"
+}
+
 func ToGoVarType(pgV string) string {
 
 	switch pgV {
@@ -78,8 +108,11 @@ func ToGoVarType(pgV string) string {
 	case "boolean":
 		return "bool"
 
-	case "int", "smallint", "integer":
+	case "smallint":
 		return "int"
+
+	case "int", "integer":
+		return "int32"
 
 	case "bigint":
 		return "int64"

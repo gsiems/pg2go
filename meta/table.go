@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"database/sql"
 	"fmt"
 
 	_ "github.com/lib/pq"
@@ -21,16 +22,9 @@ type PgTableMetadata struct {
 }
 
 // GetTableMetas returns the metadata for the avaiable tables/views
-func GetTableMetas(connStr, schema, objName, user string) (tables []PgTableMetadata, err error) {
+func GetTableMetas(db *sql.DB, schema, objName, user string) (tables []PgTableMetadata, err error) {
 
-	db, errq := OpenDB(connStr)
-	if errq != nil {
-		err = fmt.Errorf("Expected connection, got error: %q", errq)
-		return
-	}
-	defer db.CloseDB()
-
-	tables, errq = listTableMetas(db, schema, objName, user)
+	tables, errq := listTableMetas(db, schema, objName, user)
 	if errq != nil {
 		err = fmt.Errorf("Expected table metadata, got error: %q", errq)
 		return
@@ -49,8 +43,11 @@ func GetTableMetas(connStr, schema, objName, user string) (tables []PgTableMetad
 }
 
 // listTypeMetas returns the list of avaiable tables/views
-func listTableMetas(db *DB, schema, objName, user string) (d []PgTableMetadata, err error) {
-	err = db.Select(&d, `
+func listTableMetas(db *sql.DB, schema, objName, user string) (d []PgTableMetadata, err error) {
+
+	var u PgTableMetadata
+
+	q := `
 WITH args AS (
     SELECT $1 AS schema_name,
             regexp_split_to_table ( $2, ', *' ) AS obj_name,
@@ -96,20 +93,43 @@ SELECT obj.schema_name,
     CROSS JOIN args
     WHERE ( obj.obj_name = args.obj_name
             OR coalesce ( args.obj_name, '' ) = '' )
-        AND ( obj.acl::text LIKE args.username || '=%'
-            OR args.username = '' )
-        AND ( obj.acl::text NOT LIKE 'postgres=%' )
+        AND ( obj.acl::text LIKE args.username || '=%' )
     ORDER BY obj.schema_name,
         obj.obj_name,
         obj.obj_type
-`, schema, objName, user)
+`
+
+	rows, err := db.Query(q, schema, objName, user)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		err = rows.Scan(&u.SchemaName,
+			&u.ObjName,
+			&u.ObjKind,
+			&u.ObjType,
+			&u.Privs,
+			&u.Description,
+		)
+		if err != nil {
+			return
+		}
+
+		d = append(d, u)
+	}
+
 	return
 }
 
 // listTableColumnMetas returns the metadata for the avaiable table/view columns
-func listTableColumnMetas(db *DB, schema, objName string) (d []PgColumnMetadata, err error) {
-	err = db.Select(&d, `
-WITH args AS (
+func listTableColumnMetas(db *sql.DB, schema, objName string) (d []PgColumnMetadata, err error) {
+
+	var u PgColumnMetadata
+
+	q := `WITH args AS (
     SELECT $1 AS schema_name,
             $2 AS obj_name
 ),
@@ -160,6 +180,29 @@ SELECT cols.column_name,
             AND pk.obj_name = cols.obj_name
             AND pk.column_name = cols.column_name )
     ORDER BY cols.ordinal_position
-`, schema, objName)
+`
+
+	rows, err := db.Query(q, schema, objName)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		err = rows.Scan(&u.ColumnName,
+			&u.DataType,
+			&u.OrdinalPosition,
+			&u.IsRequired,
+			&u.IsPk,
+			&u.Description,
+		)
+		if err != nil {
+			return
+		}
+
+		d = append(d, u)
+	}
+
 	return
 }

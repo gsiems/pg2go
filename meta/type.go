@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"database/sql"
 	"fmt"
 
 	_ "github.com/lib/pq"
@@ -19,16 +20,9 @@ type PgUsertypeMetadata struct {
 }
 
 // GetTypeMetas returns the metadata for the avaiable user types
-func GetTypeMetas(connStr, schema, objName, user string) (types []PgUsertypeMetadata, err error) {
+func GetTypeMetas(db *sql.DB, schema, objName, user string) (types []PgUsertypeMetadata, err error) {
 
-	db, errq := OpenDB(connStr)
-	if errq != nil {
-		err = fmt.Errorf("Expected connection, got error: %q", errq)
-		return
-	}
-	defer db.CloseDB()
-
-	types, errq = listTypeMetas(db, schema, objName)
+	types, errq := listTypeMetas(db, schema, objName)
 	if errq != nil {
 		err = fmt.Errorf("Expected type metadata, got error: %q", errq)
 		return
@@ -46,10 +40,11 @@ func GetTypeMetas(connStr, schema, objName, user string) (types []PgUsertypeMeta
 }
 
 // listTypeMetas returns the list of avaiable user types
-func listTypeMetas(db *DB, schema, objName string) (d []PgUsertypeMetadata, err error) {
+func listTypeMetas(db *sql.DB, schema, objName string) (d []PgUsertypeMetadata, err error) {
 
-	err = db.Select(&d, `
-WITH args AS (
+	var u PgUsertypeMetadata
+
+	q := `WITH args AS (
     SELECT $1 AS schema_name,
             regexp_split_to_table ( $2, ', *' ) AS obj_name
 )
@@ -83,14 +78,37 @@ SELECT n.nspname::text AS schema_name,
             OR coalesce ( args.obj_name, '' ) = '' )
     ORDER BY n.nspname,
         pg_catalog.format_type ( t.oid, NULL )
-`, schema, objName)
+`
+
+	rows, err := db.Query(q, schema, objName)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		err = rows.Scan(&u.SchemaName,
+			&u.ObjName,
+			&u.ObjType,
+			&u.Description,
+		)
+		if err != nil {
+			return
+		}
+
+		d = append(d, u)
+	}
+
 	return
 }
 
 // listTypeColumnMetas returns the metadata for the avaiable user type columns
-func listTypeColumnMetas(db *DB, schema, objName string) (d []PgColumnMetadata, err error) {
+func listTypeColumnMetas(db *sql.DB, schema, objName string) (d []PgColumnMetadata, err error) {
 
-	err = db.Select(&d, `
+	var u PgColumnMetadata
+
+	q := `
 WITH args AS (
     SELECT $1 AS schema_name,
             $2 AS obj_name
@@ -124,6 +142,29 @@ SELECT cols.column_name,
     ORDER BY cols.schema_name,
             cols.obj_name,
             cols.ordinal_position
-`, schema, objName)
+`
+
+	rows, err := db.Query(q, schema, objName)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		err = rows.Scan(&u.ColumnName,
+			&u.DataType,
+			&u.OrdinalPosition,
+			&u.IsRequired,
+			&u.IsPk,
+			&u.Description,
+		)
+		if err != nil {
+			return
+		}
+
+		d = append(d, u)
+	}
+
 	return
 }

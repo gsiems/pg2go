@@ -27,14 +27,19 @@ func (db *DB) CloseDB() error {
 	return db.DB.Close()
 }
 
-func GetStructStanzas(useNullTypes bool, cols []PgColumnMetadata) string {
+func GetStructStanzas(useNullTypes, internal bool, cols []PgColumnMetadata) string {
 
 	var ary []string
 	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(useNullTypes, cols)
 
 	for _, col := range cols {
-		stanza := makeStanza(useNullTypes, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
-		ary = append(ary, stanza)
+		if internal {
+			stanza := makeInternalStanza(useNullTypes, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+			ary = append(ary, stanza)
+		} else {
+			stanza := makeStanza(useNullTypes, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+			ary = append(ary, stanza)
+		}
 	}
 	return strings.Join(ary, "")
 }
@@ -76,6 +81,31 @@ func makeStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNam
 	if col.Description != "" {
 		ary = append(ary, fmt.Sprintf(" %s", strings.ReplaceAll(col.Description, "\n", "\n//                                           ")))
 	}
+	ary = append(ary, "\n")
+
+	return strings.Join(ary, "")
+}
+
+func makeInternalStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
+
+	var ary []string
+
+	goVarName := u.ToUpperCamelCase(col.ColumnName)
+
+	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
+	VarTypeToken := ""
+	if useNullTypes {
+		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
+	} else {
+		VarTypeToken = u.Lpad(u.ToGoVarType(col.DataType), maxVarTypeLen+1)
+	}
+
+	DbToken := "`db:\"" + col.ColumnName + "\"`"
+
+	ary = append(ary, "\t")
+	ary = append(ary, VarNameToken)
+	ary = append(ary, VarTypeToken)
+	ary = append(ary, DbToken)
 	ary = append(ary, "\n")
 
 	return strings.Join(ary, "")

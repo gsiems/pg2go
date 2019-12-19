@@ -14,9 +14,9 @@ Postgresql databases from Go.
 
 * These kinds of utilities already exist!
 
-    * For table/view structures, yes. However I am not aware of any that
-      also generate structs for user defined types and/or set-returning
-      functions (not that I've looked that closely).
+    * For table/view structures, yes... and there is [xo](https://github.com/xo/xo)
+      which appears to handle functions and composite types (I haven't
+      looked at it closely enough to be sure).
 
 * Why not use one of the many Go ORMs like [gorm](https://github.com/jinzhu/gorm) or
     [gorp](https://github.com/coopernurse/gorp) or an ORM builder like
@@ -40,12 +40,6 @@ The make_structs utility generates structures for tables, views, user defined ty
   | -U string | The database user to connect as. (required)     |
   | -d string | The the database name to connect to. (required) |
   | -h string | The database host to connect to. (required)     |
-  | -r        | Generate structs for tables and views.          |
-  | -t        | Generate structs for user defined composite types. |
-  | -f        | Generate structs for result-set returning functions. |
-  | -n        | Use null datatypes in structures.               |
+  | -u string | The name of the application user that will connect to the database (required). Only those objects that the application user has privs for will be processed. |
   | -o string | The comma-separated list of the database objects to generate a structs for (defaults to all). |
   | -s string | The database schema to generate structs for (defaults to all). |
-  | -u string | The name of the application user. If specified then only structs for those objects that the user has privileges for will be generated. |
-
-Note that one of -r, -t, -f must be supplied and any combination of -r, -t, and -f may be supplied.

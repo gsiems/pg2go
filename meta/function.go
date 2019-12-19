@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -24,16 +25,9 @@ type PgFunctionMetadata struct {
 }
 
 // GetFunctionMetas returns the metadata for the avaiable functions
-func GetFunctionMetas(connStr, schema, objName, user string) (funcs []PgFunctionMetadata, err error) {
+func GetFunctionMetas(db *sql.DB, schema, objName, user string) (funcs []PgFunctionMetadata, err error) {
 
-	db, errq := OpenDB(connStr)
-	if errq != nil {
-		err = fmt.Errorf("Expected connection, got error: %q", errq)
-		return
-	}
-	defer db.CloseDB()
-
-	funcs, errq = listFunctionMetas(db, schema, objName, user)
+	funcs, errq := listFunctionMetas(db, schema, objName, user)
 	if errq != nil {
 		err = fmt.Errorf("Expected function metadata, got error: %q", errq)
 		return
@@ -80,9 +74,18 @@ func getResultColumns(f PgFunctionMetadata) (c []PgColumnMetadata) {
 }
 
 // listFunctionMetas returns the metadata for the avaiable functions
-func listFunctionMetas(db *DB, schema, objName, user string) (d []PgFunctionMetadata, err error) {
-	err = db.Select(&d, `
-WITH args AS (
+func listFunctionMetas(db *sql.DB, schema, objName, user string) (d []PgFunctionMetadata, err error) {
+
+	var u struct {
+		SchemaName    sql.NullString
+		ObjName       sql.NullString
+		ResultTypes   sql.NullString
+		ArgumentTypes sql.NullString
+		Privs         sql.NullString
+		Description   sql.NullString
+	}
+
+	q := `WITH args AS (
     SELECT $1 AS schema_name,
             regexp_split_to_table ( $2, ', *' ) AS obj_name,
             $3 AS username
@@ -117,11 +120,38 @@ SELECT obj.schema_name,
         coalesce ( obj.description, '' ) AS description
     FROM obj
     CROSS JOIN args
-    WHERE ( obj.acl::text LIKE args.username || '=%'
-            OR args.username = '' )
+    WHERE obj.acl::text LIKE args.username || '=%'
     ORDER BY obj.schema_name,
         obj.obj_name,
         obj.argument_types
-`, schema, objName, user)
+`
+	rows, err := db.Query(q, schema, objName, user)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		err = rows.Scan(&u.SchemaName,
+			&u.ObjName,
+			&u.ResultTypes,
+			&u.ArgumentTypes,
+			&u.Privs,
+			&u.Description,
+		)
+		if err != nil {
+			return
+		}
+
+		d = append(d, PgFunctionMetadata{
+			ObjName:       u.ObjName.String,
+			ResultTypes:   u.ResultTypes.String,
+			ArgumentTypes: u.ArgumentTypes.String,
+			Privs:         u.Privs.String,
+			Description:   u.Description.String,
+		})
+	}
+
 	return
 }

@@ -1,18 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"strings"
 
+	_ "github.com/lib/pq"
+
 	m "github.com/gsiems/pg2go/meta"
 )
 
 type cArgs struct {
-	genRels      bool
-	genTypes     bool
-	genFuncs     bool
 	useNullTypes bool
 	packageName  string
 	schemaName   string
@@ -28,63 +28,58 @@ func main() {
 
 	var args cArgs
 
-	flag.BoolVar(&args.genRels, "r", false, "Generate structs for tables and views.")
-	flag.BoolVar(&args.genTypes, "t", false, "Generate structs for user defined types.")
-	flag.BoolVar(&args.genFuncs, "f", false, "Generate structs for result-set returning functions.")
-
 	flag.BoolVar(&args.useNullTypes, "n", false, "Use null datatypes in structures.")
 	flag.StringVar(&args.packageName, "package", "main", "The package name (defaults to main).")
 
 	flag.StringVar(&args.schemaName, "s", "", "The database schema to generate structs for (defaults to all).")
 	flag.StringVar(&args.objName, "o", "", "The comma-separated list of the database objects to generate a structs for (defaults to all).")
-	flag.StringVar(&args.appUser, "u", "", "The name of the application user. If specified then only structs for those objects that the user has privileges for will be generated.")
+	flag.StringVar(&args.appUser, "u", "", "The name of the application user. Only structs for those objects that the user has privileges for will be generated.")
 
-	flag.StringVar(&args.dbName, "d", "", "The the database name to connect to.")
+	flag.StringVar(&args.dbName, "d", "", "The database name to connect to.")
 	flag.StringVar(&args.dbHost, "h", "", "The database host to connect to.")
 	flag.StringVar(&args.dbPort, "p", "5432", "The port to connect on.")
 	flag.StringVar(&args.dbUser, "U", "", "The database user to connect as.")
 
 	flag.Parse()
 
-	if !args.genTypes && !args.genRels && !args.genFuncs {
-		fmt.Println("No structure types specified. Select some combination of table, type, and function structures to generate.")
-	}
-
-	if args.dbUser == "" || args.dbName == "" || args.dbHost == "" {
-		fmt.Println("Insufficient connections parameters specified. Specify the user, host, and database to connect to.")
-	}
-
-	if (!args.genTypes && !args.genRels && !args.genFuncs) || args.dbUser == "" || args.dbName == "" || args.dbHost == "" {
+	if args.dbUser == "" || args.dbName == "" || args.dbHost == "" || args.appUser == "" {
+		fmt.Println("Insufficient connections parameters specified.")
 		flag.PrintDefaults()
 	}
 
 	connStr := fmt.Sprintf("user=%s dbname=%s host=%s port=%s", args.dbUser, args.dbName, args.dbHost, args.dbPort)
 
+	dbPool, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatalf("FAILED! Expected database connection, got error: %q.\n", err)
+	}
+	defer dbPool.Close()
+
+	err = dbPool.Ping()
+	if err != nil {
+		log.Fatalf("FAILED! Expected database ping, got error: %q.\n", err)
+	}
+
 	genHeader(args)
 
-	if args.genTypes {
-		types, err := m.GetTypeMetas(connStr, args.schemaName, args.objName, args.appUser)
-		if err != nil {
-			log.Fatalf("FAILED! %q.\n", err)
-		}
-		genTypeStructs(args, types)
+	types, err := m.GetTypeMetas(dbPool, args.schemaName, args.objName, args.appUser)
+	if err != nil {
+		log.Fatalf("FAILED! %q.\n", err)
 	}
+	genTypeStructs(args, types)
 
-	if args.genRels {
-		tables, err := m.GetTableMetas(connStr, args.schemaName, args.objName, args.appUser)
-		if err != nil {
-			log.Fatalf("FAILED! %q.\n", err)
-		}
-		genTableStructs(args, tables)
+	tables, err := m.GetTableMetas(dbPool, args.schemaName, args.objName, args.appUser)
+	if err != nil {
+		log.Fatalf("FAILED! %q.\n", err)
 	}
+	genTableStructs(args, tables)
 
-	if args.genFuncs {
-		funcs, err := m.GetFunctionMetas(connStr, args.schemaName, args.objName, args.appUser)
-		if err != nil {
-			log.Fatalf("FAILED! %q.\n", err)
-		}
-		genFunctionStructs(args, funcs)
+	funcs, err := m.GetFunctionMetas(dbPool, args.schemaName, args.objName, args.appUser)
+	if err != nil {
+		log.Fatalf("FAILED! %q.\n", err)
 	}
+	genFunctionStructs(args, funcs)
+
 }
 
 func genHeader(args cArgs) {
@@ -103,19 +98,6 @@ func genHeader(args cArgs) {
 	if args.appUser != "" {
 		fmt.Printf("// App user: %s\n", args.appUser)
 	}
-	fmt.Print("// Generated structs for: ")
-	var ary []string
-
-	if args.genTypes {
-		ary = append(ary, "user defined types")
-	}
-	if args.genRels {
-		ary = append(ary, "tables/views")
-	}
-	if args.genFuncs {
-		ary = append(ary, "functions")
-	}
-	fmt.Printf("%s\n", strings.Join(ary, ", "))
 
 	fmt.Println()
 	fmt.Println("import (")
@@ -143,7 +125,7 @@ func genTypeStructs(args cArgs, d []m.PgUsertypeMetadata) {
 		}
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(m.GetStructStanzas(args.useNullTypes, f.Columns))
+		fmt.Print(m.GetStructStanzas(args.useNullTypes, false, f.Columns))
 
 		fmt.Println("}")
 	}
@@ -174,7 +156,7 @@ func genTableStructs(args cArgs, d []m.PgTableMetadata) {
 		}
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(m.GetStructStanzas(args.useNullTypes, f.Columns))
+		fmt.Print(m.GetStructStanzas(args.useNullTypes, false, f.Columns))
 
 		fmt.Println("}")
 	}
@@ -208,7 +190,7 @@ func genFunctionStructs(args cArgs, d []m.PgFunctionMetadata) {
 
 		fmt.Printf("type %s struct {\n", f.StructName)
 
-		fmt.Print(m.GetStructStanzas(args.useNullTypes, f.ResultColumns))
+		fmt.Print(m.GetStructStanzas(args.useNullTypes, false, f.ResultColumns))
 
 		fmt.Println("}")
 	}
