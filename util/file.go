@@ -44,7 +44,7 @@ func OpenOutputFile(dir, filename string) (f *os.File) {
 	if target == "" || target == "-" {
 		f = os.Stdout
 	} else {
-		f, err = os.OpenFile(target, os.O_CREATE|os.O_WRONLY, 0644)
+		f, err = os.Create(target) //OpenFile(target, os.O_CREATE|os.O_WRONLY, 0644)
 		DieOnErrf("File open failed: %q", err)
 	}
 	return f
