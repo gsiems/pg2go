@@ -41,7 +41,7 @@ func GetStructStanzas(useNullTypes, internal bool, cols []PgColumnMetadata) stri
 			ary = append(ary, stanza)
 		}
 	}
-	return strings.Join(ary, "")
+	return strings.Join(ary, "\n")
 }
 
 func makeStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
@@ -81,7 +81,6 @@ func makeStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNam
 	if col.Description != "" {
 		ary = append(ary, fmt.Sprintf(" %s", strings.ReplaceAll(col.Description, "\n", "\n//                                           ")))
 	}
-	ary = append(ary, "\n")
 
 	return strings.Join(ary, "")
 }
@@ -106,7 +105,6 @@ func makeInternalStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, m
 	ary = append(ary, VarNameToken)
 	ary = append(ary, VarTypeToken)
 	ary = append(ary, DbToken)
-	ary = append(ary, "\n")
 
 	return strings.Join(ary, "")
 }

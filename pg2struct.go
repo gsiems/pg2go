@@ -4,12 +4,12 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"log"
 	"strings"
 
 	_ "github.com/lib/pq"
 
 	m "github.com/gsiems/pg2go/meta"
+	u "github.com/gsiems/pg2go/util"
 )
 
 type cArgs struct {
@@ -50,64 +50,57 @@ func main() {
 	connStr := fmt.Sprintf("user=%s dbname=%s host=%s port=%s", args.dbUser, args.dbName, args.dbHost, args.dbPort)
 
 	dbPool, err := sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatalf("FAILED! Expected database connection, got error: %q.\n", err)
-	}
+	u.DieOnErrf("Expected database connection, got error %q.\n", err)
 	defer dbPool.Close()
 
 	err = dbPool.Ping()
-	if err != nil {
-		log.Fatalf("FAILED! Expected database ping, got error: %q.\n", err)
-	}
-
-	genHeader(args)
+	u.DieOnErrf("Expected database ping, got error %q.\n", err)
 
 	types, err := m.GetTypeMetas(dbPool, args.schemaName, args.objName, args.appUser)
-	if err != nil {
-		log.Fatalf("FAILED! %q.\n", err)
-	}
+	u.DieOnErrf("FAILED! %q.\n", err)
 	genTypeStructs(args, types)
 
 	tables, err := m.GetTableMetas(dbPool, args.schemaName, args.objName, args.appUser)
-	if err != nil {
-		log.Fatalf("FAILED! %q.\n", err)
-	}
+	u.DieOnErrf("FAILED! %q.\n", err)
 	genTableStructs(args, tables)
 
 	funcs, err := m.GetFunctionMetas(dbPool, args.schemaName, args.objName, args.appUser)
-	if err != nil {
-		log.Fatalf("FAILED! %q.\n", err)
-	}
+	u.DieOnErrf("FAILED! %q.\n", err)
 	genFunctionStructs(args, funcs)
 
 }
 
-func genHeader(args cArgs) {
-	fmt.Printf("package %s\n", args.packageName)
-	fmt.Println()
+func initCodeBuf(args cArgs) (cb *u.LineBuf) {
 
-	fmt.Println("// Postgresql structs generated for the following:")
-	fmt.Printf("// Host: %s\n", args.dbHost)
-	fmt.Printf("// Database: %s\n", args.dbName)
+	cb = u.InitLineBuf()
+	cb.Append(fmt.Sprintf("package %s", args.packageName))
+	cb.Append("")
+
+	cb.Append(fmt.Sprintf("// Postgresql structs generated for the following:"))
+	cb.Append(fmt.Sprintf("// Host: %s", args.dbHost))
+	cb.Append(fmt.Sprintf("// Database: %s", args.dbName))
 	if args.schemaName != "" {
-		fmt.Printf("// Schema: %s\n", args.schemaName)
+		cb.Append(fmt.Sprintf("// Schema: %s", args.schemaName))
 	}
 	if args.objName != "" {
-		fmt.Printf("// Object Name: %s\n", args.objName)
+		cb.Append(fmt.Sprintf("// Object Name: %s", args.objName))
 	}
 	if args.appUser != "" {
-		fmt.Printf("// App user: %s\n", args.appUser)
+		cb.Append(fmt.Sprintf("// App user: %s", args.appUser))
 	}
 
-	fmt.Println()
-	fmt.Println("import (")
+	cb.Append("")
+	cb.Append("import (")
 	if args.useNullTypes {
-		fmt.Println("\t\"database/sql\"")
+		cb.Append("\t\"database/sql\"")
 	} else {
-		fmt.Println("\t\"time\"")
+		cb.Append("\t\"time\"")
 	}
-	fmt.Println(")")
 
+	cb.Append(")")
+	cb.Append("")
+
+	return cb
 }
 
 func genTypeStructs(args cArgs, d []m.PgUsertypeMetadata) {
@@ -118,16 +111,20 @@ func genTypeStructs(args cArgs, d []m.PgUsertypeMetadata) {
 			continue
 		}
 
-		fmt.Println()
-		fmt.Printf("// %s struct for the %s.%s %s type\n", f.StructName, f.SchemaName, f.ObjName, f.ObjType)
+		cb := initCodeBuf(args)
+
+		cb.Append(fmt.Sprintf("// %s struct for the %s.%s %s type", f.StructName, f.SchemaName, f.ObjName, f.ObjType))
 		if f.Description != "" {
-			fmt.Printf("// %s\n", strings.ReplaceAll(f.Description, "\n", "\n// "))
+			cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
 		}
-		fmt.Printf("type %s struct {\n", f.StructName)
+		cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
 
-		fmt.Print(m.GetStructStanzas(args.useNullTypes, false, f.Columns))
+		cb.Append(m.GetStructStanzas(args.useNullTypes, false, f.Columns))
 
-		fmt.Println("}")
+		cb.Append("}")
+		cb.Append("")
+
+		u.WriteFile(args.packageName, f.StructName, cb)
 	}
 }
 
@@ -149,16 +146,21 @@ func genTableStructs(args cArgs, d []m.PgTableMetadata) {
 		}
 		seen[f.StructName] = 1
 
-		fmt.Println()
-		fmt.Printf("// %s struct for the %s.%s %s\n", f.StructName, f.SchemaName, f.ObjName, f.ObjType)
+		cb := initCodeBuf(args)
+
+		cb.Append(fmt.Sprintf("// %s struct for the %s.%s %s", f.StructName, f.SchemaName, f.ObjName, f.ObjType))
 		if f.Description != "" {
-			fmt.Printf("// %s\n", strings.ReplaceAll(f.Description, "\n", "\n// "))
+			cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
 		}
-		fmt.Printf("type %s struct {\n", f.StructName)
+		cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
 
-		fmt.Print(m.GetStructStanzas(args.useNullTypes, false, f.Columns))
+		cb.Append(m.GetStructStanzas(args.useNullTypes, false, f.Columns))
 
-		fmt.Println("}")
+		cb.Append("}")
+		cb.Append("")
+
+		u.WriteFile(args.packageName, f.StructName, cb)
+
 	}
 }
 
@@ -182,16 +184,21 @@ func genFunctionStructs(args cArgs, d []m.PgFunctionMetadata) {
 		}
 		seen[f.StructName] = 1
 
-		fmt.Println()
-		fmt.Printf("// %s struct for the result set from the %s.%s function\n", f.StructName, f.SchemaName, f.ObjName)
+		cb := initCodeBuf(args)
+
+		cb.Append(fmt.Sprintf("// %s struct for the result set from the %s.%s function\n", f.StructName, f.SchemaName, f.ObjName))
 		if f.Description != "" {
-			fmt.Printf("// %s\n", strings.ReplaceAll(f.Description, "\n", "\n// "))
+			cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
 		}
 
-		fmt.Printf("type %s struct {\n", f.StructName)
+		cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
 
-		fmt.Print(m.GetStructStanzas(args.useNullTypes, false, f.ResultColumns))
+		cb.Append(m.GetStructStanzas(args.useNullTypes, false, f.ResultColumns))
 
-		fmt.Println("}")
+		cb.Append("}")
+		cb.Append("")
+
+		u.WriteFile(args.packageName, fmt.Sprintf("f%s", f.StructName), cb)
+
 	}
 }
