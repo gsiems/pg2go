@@ -27,24 +27,24 @@ func (db *DB) CloseDB() error {
 	return db.DB.Close()
 }
 
-func GetStructStanzas(useNullTypes, internal bool, cols []PgColumnMetadata) string {
+func GetStructStanzas(noNulls, internal bool, cols []PgColumnMetadata) string {
 
 	var ary []string
-	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(useNullTypes, cols)
+	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(noNulls, cols)
 
 	for _, col := range cols {
 		if internal {
-			stanza := makeInternalStanza(useNullTypes, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+			stanza := makeQueryStanza(noNulls, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
 			ary = append(ary, stanza)
 		} else {
-			stanza := makeStanza(useNullTypes, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+			stanza := makePublicStanza(noNulls, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
 			ary = append(ary, stanza)
 		}
 	}
 	return strings.Join(ary, "\n")
 }
 
-func makeStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
+func makePublicStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
 
 	var ary []string
 
@@ -53,10 +53,10 @@ func makeStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNam
 
 	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
 	VarTypeToken := ""
-	if useNullTypes {
-		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
-	} else {
+	if noNulls {
 		VarTypeToken = u.Lpad(u.ToGoVarType(col.DataType), maxVarTypeLen+1)
+	} else {
+		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
 	}
 
 	JSONToken := u.Lpad("`json:\""+jsonName+"\"", maxVarNameLen+9)
@@ -85,40 +85,32 @@ func makeStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNam
 	return strings.Join(ary, "")
 }
 
-func makeInternalStanza(useNullTypes bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
+func makeQueryStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
 
 	var ary []string
 
 	goVarName := u.ToUpperCamelCase(col.ColumnName)
 
 	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
-	VarTypeToken := ""
-	if useNullTypes {
-		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
-	} else {
-		VarTypeToken = u.Lpad(u.ToGoVarType(col.DataType), maxVarTypeLen+1)
-	}
+	VarTypeToken := u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
 
-	DbToken := "`db:\"" + col.ColumnName + "\"`"
-
-	ary = append(ary, "\t")
+	ary = append(ary, "\t\t")
 	ary = append(ary, VarNameToken)
 	ary = append(ary, VarTypeToken)
-	ary = append(ary, DbToken)
 
 	return strings.Join(ary, "")
 }
 
-func getMaxLens(useNullTypes bool, cols []PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int) {
+func getMaxLens(noNulls bool, cols []PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int) {
 	for _, col := range cols {
 		goVarName := u.ToUpperCamelCase(col.ColumnName)
 		maxDbNameLen = maxStringLen(col.ColumnName, maxDbNameLen)
 		maxVarNameLen = maxStringLen(goVarName, maxVarNameLen)
 
-		if useNullTypes {
-			maxVarTypeLen = maxStringLen(u.ToNullVarType(col.DataType), maxVarTypeLen)
-		} else {
+		if noNulls {
 			maxVarTypeLen = maxStringLen(u.ToGoVarType(col.DataType), maxVarTypeLen)
+		} else {
+			maxVarTypeLen = maxStringLen(u.ToNullVarType(col.DataType), maxVarTypeLen)
 		}
 
 	}
