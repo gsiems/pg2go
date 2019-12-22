@@ -42,7 +42,7 @@ func GetTableMetas(db *sql.DB, schema, objName, user string) (tables []PgTableMe
 	return
 }
 
-// listTypeMetas returns the list of avaiable tables/views
+// listTableMetas returns the list of avaiable tables/views
 func listTableMetas(db *sql.DB, schema, objName, user string) (d []PgTableMetadata, err error) {
 
 	var u PgTableMetadata
@@ -138,6 +138,8 @@ cols AS (
             c.relname::text AS obj_name,
             a.attname::text AS column_name,
             pg_catalog.format_type ( a.atttypid, a.atttypmod ) AS data_type,
+            ltrim ( t.typname, '_' ) AS type_name,
+            t.typcategory AS type_category,
             a.attnotnull AS is_required,
             a.attnum AS ordinal_position,
             pg_catalog.col_description ( a.attrelid, a.attnum ) AS description
@@ -146,6 +148,8 @@ cols AS (
             ON ( c.oid = a.attrelid )
         JOIN pg_catalog.pg_namespace n
             ON ( n.oid = c.relnamespace )
+        JOIN pg_catalog.pg_type t
+            ON ( t.oid = a.atttypid )
         CROSS JOIN args
         WHERE a.attnum > 0
             AND NOT a.attisdropped
@@ -167,6 +171,8 @@ pk AS (
 )
 SELECT cols.column_name,
         cols.data_type,
+        cols.type_name,
+        cols.type_category,
         cols.ordinal_position,
         cols.is_required,
         CASE
@@ -192,6 +198,8 @@ SELECT cols.column_name,
 
 		err = rows.Scan(&u.ColumnName,
 			&u.DataType,
+			&u.TypeName,
+			&u.TypeCategory,
 			&u.OrdinalPosition,
 			&u.IsRequired,
 			&u.IsPk,

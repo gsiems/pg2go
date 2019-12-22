@@ -60,7 +60,8 @@ SELECT n.nspname::text AS schema_name,
     JOIN pg_catalog.pg_namespace n
         ON n.oid = t.typnamespace
     CROSS JOIN args
-    WHERE ( t.typrelid = 0
+    WHERE t.typtype = 'c'
+        AND ( t.typrelid = 0
             OR ( SELECT c.relkind = 'c'
                     FROM pg_catalog.pg_class c
                     WHERE c.oid = t.typrelid ) )
@@ -115,25 +116,32 @@ WITH args AS (
 ),
 cols AS (
     SELECT n.nspname::text AS schema_name,
-            pg_catalog.format_type ( t.oid, NULL ) AS obj_name,
+            pg_catalog.format_type ( tt.oid, NULL ) AS obj_name,
             a.attname::text AS column_name,
             pg_catalog.format_type ( a.atttypid, a.atttypmod ) AS data_type,
+            ltrim ( tc.typname, '_' ) AS type_name,
+            tc.typcategory AS type_category,
             a.attnotnull AS is_required,
             a.attnum AS ordinal_position,
             pg_catalog.col_description ( a.attrelid, a.attnum ) AS description
         FROM pg_catalog.pg_attribute a
-        JOIN pg_catalog.pg_type t
-            ON a.attrelid = t.typrelid
+        JOIN pg_catalog.pg_type tt
+            ON a.attrelid = tt.typrelid
+        JOIN pg_catalog.pg_type tc
+            ON a.atttypid = tc.oid
         JOIN pg_catalog.pg_namespace n
-            ON ( n.oid = t.typnamespace )
+            ON ( n.oid = tt.typnamespace )
         CROSS JOIN args
-        WHERE a.attnum > 0
+        WHERE tt.typtype = 'c'
+            AND a.attnum > 0
             AND NOT a.attisdropped
             AND n.nspname = args.schema_name
-            AND pg_catalog.format_type ( t.oid, NULL ) = args.obj_name
+            AND pg_catalog.format_type ( tt.oid, NULL ) = args.obj_name
 )
 SELECT cols.column_name,
         cols.data_type,
+        cols.type_name,
+        cols.type_category,
         cols.ordinal_position,
         cols.is_required,
         false AS is_pk,
@@ -154,6 +162,8 @@ SELECT cols.column_name,
 
 		err = rows.Scan(&u.ColumnName,
 			&u.DataType,
+			&u.TypeName,
+			&u.TypeCategory,
 			&u.OrdinalPosition,
 			&u.IsRequired,
 			&u.IsPk,
