@@ -19,7 +19,9 @@ type PgFunctionMetadata struct {
 	Privs            string `db:"privs"`
 	Description      string `db:"description"`
 	StructName       string
-	ResultType       string
+	argTypes         string
+	argModes         string
+	argNames         string
 	ResultColumns    []PgColumnMetadata
 	CallingArguments []PgColumnMetadata
 }
@@ -34,42 +36,38 @@ func GetFunctionMetas(db *sql.DB, schema, objName, user string) (funcs []PgFunct
 	}
 	for i, f := range funcs {
 		funcs[i].StructName = u.ToUpperCamelCase(f.ObjName)
-		funcs[i].CallingArguments = getCallingArguments(f)
 
-		if strings.HasPrefix(f.ResultTypes, "TABLE(") {
-			funcs[i].ResultColumns = getResultColumns(f)
-		} else {
-			funcs[i].ResultType = f.ResultTypes
-		}
-	}
-	return
-}
+		if funcs[i].argTypes != "" {
+			var fat []PgColumnMetadata
+			var frt []PgColumnMetadata
 
-func getCallingArguments(f PgFunctionMetadata) (c []PgColumnMetadata) {
+			argtypes := strings.Split(funcs[i].argTypes, ",")
+			argmodes := strings.Split(funcs[i].argModes, ",")
+			argnames := strings.Split(funcs[i].argNames, ",")
 
-	if f.ArgumentTypes != "" {
-		parms := strings.Split(f.ArgumentTypes, ", ")
-		for i, p := range parms {
-			t := strings.SplitN(p, " ", 2)
-			if len(t) == 2 {
-				c = append(c, PgColumnMetadata{ColumnName: t[0], DataType: t[1], OrdinalPosition: i})
+			for j, argtype := range argtypes {
+
+				c, errq := popTypeMeta(db, argtype)
+				if errq != nil {
+					err = fmt.Errorf("Expected function type metadata, got error: %q", errq)
+					return
+				}
+				c.OrdinalPosition = j + 1
+				c.ColumnName = argnames[j]
+
+				if argmodes[j] == "i" {
+					fat = append(fat, c)
+				} else {
+					frt = append(frt, c)
+				}
+
 			}
+
+			funcs[i].ResultColumns = frt
+			funcs[i].CallingArguments = fat
 		}
 	}
-	return
-}
 
-func getResultColumns(f PgFunctionMetadata) (c []PgColumnMetadata) {
-
-	if strings.HasPrefix(f.ResultTypes, "TABLE(") {
-		parms := strings.Split(strings.Replace(strings.Replace(f.ResultTypes, "TABLE(", "", 1), ")", "", 1), ", ")
-		for i, p := range parms {
-			t := strings.SplitN(p, " ", 2)
-			if len(t) == 2 {
-				c = append(c, PgColumnMetadata{ColumnName: t[0], DataType: t[1], OrdinalPosition: i})
-			}
-		}
-	}
 	return
 }
 
@@ -83,6 +81,9 @@ func listFunctionMetas(db *sql.DB, schema, objName, user string) (d []PgFunction
 		ArgumentTypes sql.NullString
 		Privs         sql.NullString
 		Description   sql.NullString
+		argTypes      sql.NullString
+		argModes      sql.NullString
+		argNames      sql.NullString
 	}
 
 	q := `WITH args AS (
@@ -96,7 +97,10 @@ obj AS (
             pg_catalog.pg_get_function_result ( p.oid ) AS result_types,
             pg_catalog.pg_get_function_arguments ( p.oid ) AS argument_types,
             pg_catalog.obj_description(p.oid, 'pg_proc') AS description,
-            unnest ( p.proacl ) AS acl
+            unnest ( p.proacl ) AS acl,
+            coalesce ( p.proallargtypes::text, '' ) AS arg_types,
+            coalesce ( p.proargmodes::text, '' ) AS arg_modes,
+            coalesce ( p.proargnames::text, '' ) AS arg_names
         FROM pg_catalog.pg_proc p
         JOIN pg_catalog.pg_namespace n
             ON n.oid = p.pronamespace
@@ -117,7 +121,10 @@ SELECT obj.schema_name,
         coalesce ( obj.result_types, '' ) AS result_types,
         coalesce ( obj.argument_types, '' ) AS argument_types,
         coalesce ( regexp_replace ( regexp_replace ( obj.acl::text, '^[^=]+=', '' ), '[/].+', '' ), '' ) AS privs,
-        coalesce ( obj.description, '' ) AS description
+        coalesce ( obj.description, '' ) AS description,
+        regexp_replace ( obj.arg_types, '[{}]', '' ) AS arg_types,
+        regexp_replace ( obj.arg_modes, '[{}]', '' ) AS arg_modes,
+        regexp_replace ( obj.arg_names, '[{}]', '' ) AS arg_names
     FROM obj
     CROSS JOIN args
     WHERE obj.acl::text LIKE args.username || '=%'
@@ -139,6 +146,9 @@ SELECT obj.schema_name,
 			&u.ArgumentTypes,
 			&u.Privs,
 			&u.Description,
+			&u.argTypes,
+			&u.argModes,
+			&u.argNames,
 		)
 		if err != nil {
 			return
@@ -151,51 +161,40 @@ SELECT obj.schema_name,
 			ArgumentTypes: u.ArgumentTypes.String,
 			Privs:         u.Privs.String,
 			Description:   u.Description.String,
+			argTypes:      u.argTypes.String,
+			argModes:      u.argModes.String,
+			argNames:      u.argNames.String,
 		})
 	}
 
 	return
 }
 
-/*
-WITH args AS (
-    SELECT $1 AS schema_name,
-            regexp_split_to_table ( $2, ', *' ) AS obj_name,
-            $3 AS username
-),
-obj AS (
-    SELECT n.nspname::text AS schema_name,
-            p.proname::text AS obj_name,
-            pg_catalog.pg_get_function_result ( p.oid ) AS result_types,
-            pg_catalog.pg_get_function_arguments ( p.oid ) AS argument_types,
-            pg_catalog.obj_description(p.oid, 'pg_proc') AS description,
-            unnest ( p.proacl ) AS acl
-        FROM pg_catalog.pg_proc p
-        JOIN pg_catalog.pg_namespace n
-            ON n.oid = p.pronamespace
-        CROSS JOIN args
-        WHERE NOT p.proisagg
-            AND NOT p.proiswindow
-            AND NOT p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype
-            AND n.nspname <> 'pg_catalog'
-            AND n.nspname <> 'information_schema'
-            AND n.nspname !~ '^pg_toast'
-            AND ( n.nspname = args.schema_name
-                OR args.schema_name = '' )
-            AND ( p.proname = args.obj_name
-                OR coalesce ( args.obj_name, '' ) = '' )
-)
-SELECT obj.schema_name,
-        obj.obj_name,
-        coalesce ( obj.result_types, '' ) AS result_types,
-        coalesce ( obj.argument_types, '' ) AS argument_types,
-        coalesce ( regexp_replace ( regexp_replace ( obj.acl::text, '^[^=]+=', '' ), '[/].+', '' ), '' ) AS privs,
-        coalesce ( obj.description, '' ) AS description
-    FROM obj
-    CROSS JOIN args
-    WHERE obj.acl::text LIKE args.username || '=%'
-    ORDER BY obj.schema_name,
-        obj.obj_name,
-        obj.argument_types
+// popTypeMeta returns the metadata for the specified type
+func popTypeMeta(db *sql.DB, arg_type string) (u PgColumnMetadata, err error) {
 
-*/
+	q := `
+SELECT pg_catalog.format_type ( oid, null ) AS data_type,
+        ltrim ( typname, '_' ) AS type_name,
+        typcategory AS type_category
+    FROM pg_catalog.pg_type
+    WHERE oid::text = $1
+`
+
+	rows, err := db.Query(q, arg_type)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		err = rows.Scan(&u.DataType,
+			&u.TypeName,
+			&u.TypeCategory,
+		)
+
+	}
+
+	return
+}
