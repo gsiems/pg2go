@@ -145,6 +145,7 @@ SELECT obj.schema_name,
 		}
 
 		d = append(d, PgFunctionMetadata{
+			SchemaName:    u.SchemaName.String,
 			ObjName:       u.ObjName.String,
 			ResultTypes:   u.ResultTypes.String,
 			ArgumentTypes: u.ArgumentTypes.String,
@@ -155,3 +156,46 @@ SELECT obj.schema_name,
 
 	return
 }
+
+/*
+WITH args AS (
+    SELECT $1 AS schema_name,
+            regexp_split_to_table ( $2, ', *' ) AS obj_name,
+            $3 AS username
+),
+obj AS (
+    SELECT n.nspname::text AS schema_name,
+            p.proname::text AS obj_name,
+            pg_catalog.pg_get_function_result ( p.oid ) AS result_types,
+            pg_catalog.pg_get_function_arguments ( p.oid ) AS argument_types,
+            pg_catalog.obj_description(p.oid, 'pg_proc') AS description,
+            unnest ( p.proacl ) AS acl
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n
+            ON n.oid = p.pronamespace
+        CROSS JOIN args
+        WHERE NOT p.proisagg
+            AND NOT p.proiswindow
+            AND NOT p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype
+            AND n.nspname <> 'pg_catalog'
+            AND n.nspname <> 'information_schema'
+            AND n.nspname !~ '^pg_toast'
+            AND ( n.nspname = args.schema_name
+                OR args.schema_name = '' )
+            AND ( p.proname = args.obj_name
+                OR coalesce ( args.obj_name, '' ) = '' )
+)
+SELECT obj.schema_name,
+        obj.obj_name,
+        coalesce ( obj.result_types, '' ) AS result_types,
+        coalesce ( obj.argument_types, '' ) AS argument_types,
+        coalesce ( regexp_replace ( regexp_replace ( obj.acl::text, '^[^=]+=', '' ), '[/].+', '' ), '' ) AS privs,
+        coalesce ( obj.description, '' ) AS description
+    FROM obj
+    CROSS JOIN args
+    WHERE obj.acl::text LIKE args.username || '=%'
+    ORDER BY obj.schema_name,
+        obj.obj_name,
+        obj.argument_types
+
+*/
