@@ -10,7 +10,7 @@ import (
 	u "github.com/gsiems/pg2go/util"
 )
 
-// DB contains an sqlx database connection
+// DB contains an database/sql connection
 type DB struct {
 	*sql.DB
 }
@@ -29,17 +29,17 @@ func (db *DB) CloseDB() error {
 	return db.DB.Close()
 }
 
-func GetStructStanzas(noNulls, internal bool, cols []PgColumnMetadata) (s string, err error) {
+func GetStructStanzas(cols []PgColumnMetadata) (s string, err error) {
 
 	var ary []string
-	maxDbNameLen, maxVarNameLen, maxVarTypeLen, err := getMaxLens(noNulls, cols)
+	maxDbNameLen, maxVarNameLen, maxVarTypeLen, err := getMaxLens(cols)
 	if err != nil {
 		return
 	}
 
 	var stanza string
 	for _, col := range cols {
-		stanza, err = makeStructStanza(noNulls, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+		stanza, err = makeStructStanza(col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
 		if err != nil {
 			return
 		}
@@ -49,7 +49,7 @@ func GetStructStanzas(noNulls, internal bool, cols []PgColumnMetadata) (s string
 	return
 }
 
-func makeStructStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) (s string, err error) {
+func makeStructStanza(col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) (s string, err error) {
 
 	var ary []string
 
@@ -90,7 +90,7 @@ func makeStructStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNa
 	return
 }
 
-func getMaxLens(noNulls bool, cols []PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int, err error) {
+func getMaxLens(cols []PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int, err error) {
 
 	for _, col := range cols {
 		goVarName := u.ToUpperCamelCase(col.ColumnName)
