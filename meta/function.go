@@ -35,6 +35,15 @@ func GetFunctionMetas(db *sql.DB, schema, objName, user string) (funcs []PgFunct
 		return
 	}
 	for i, f := range funcs {
+		/*
+			fmt.Println("\n-------------------------------------------------------------------")
+			fmt.Printf("GetFunctionMetas: %q.%q\n", f.SchemaName, f.ObjName)
+			fmt.Printf("    ArgumentTypes: %q\n", f.ArgumentTypes)
+			fmt.Printf("    ResultTypes: %q\n", f.ResultTypes)
+			fmt.Printf("    argTypes: %q\n", f.argTypes)
+			fmt.Printf("    argModes: %q\n", f.argModes)
+			fmt.Printf("    argNames: %q\n", f.argNames)
+		*/
 		funcs[i].StructName = u.ToUpperCamelCase(f.ObjName)
 
 		if funcs[i].argTypes != "" {
@@ -60,7 +69,15 @@ func GetFunctionMetas(db *sql.DB, schema, objName, user string) (funcs []PgFunct
 				} else {
 					frt = append(frt, c)
 				}
-
+				/*
+					fmt.Println("        -------------------")
+					fmt.Printf("        ArgName: %q\n", argnames[j])
+					fmt.Printf("        ArgMode: %q\n", argmodes[j])
+					fmt.Printf("        ArgType: %q\n", argtypes[j])
+					fmt.Printf("        DataType: %q\n", c.DataType)
+					fmt.Printf("        TypeName: %q\n", c.TypeName)
+					fmt.Printf("        TypeCategory: %q\n", c.TypeCategory)
+				*/
 			}
 
 			funcs[i].ResultColumns = frt
@@ -91,19 +108,46 @@ func listFunctionMetas(db *sql.DB, schema, objName, user string) (d []PgFunction
             regexp_split_to_table ( $2, ', *' ) AS obj_name,
             $3 AS username
 ),
-obj AS (
+proc AS (
     SELECT n.nspname::text AS schema_name,
             p.proname::text AS obj_name,
             pg_catalog.pg_get_function_result ( p.oid ) AS result_types,
             pg_catalog.pg_get_function_arguments ( p.oid ) AS argument_types,
             pg_catalog.obj_description(p.oid, 'pg_proc') AS description,
-            unnest ( p.proacl ) AS acl,
-            coalesce ( p.proallargtypes::text, '' ) AS arg_types,
-            coalesce ( p.proargmodes::text, '' ) AS arg_modes,
-            coalesce ( p.proargnames::text, '' ) AS arg_names
+            p.proacl,
+            CASE
+                WHEN p.proallargtypes IS NOT NULL
+                    THEN regexp_replace ( p.proallargtypes::text, '[{}]', '', 'g' )
+                END AS all_arg_types,
+            CASE
+                WHEN p.proargmodes IS NOT NULL
+                    THEN regexp_replace ( p.proargmodes::text, '[{}]', '', 'g' )
+                END AS all_arg_modes,
+            CASE
+                WHEN p.proargnames IS NOT NULL
+                    THEN regexp_replace ( p.proargnames::text, '[{}]', '', 'g' )
+                END AS all_arg_names,
+            CASE
+                WHEN p.proargtypes IS NOT NULL AND p.proargtypes::text <> ''
+                    THEN regexp_replace ( p.proargtypes::text, '[ ]+', ',', 'g' )
+                END AS in_arg_types,
+            CASE
+                WHEN p.proargtypes IS NOT NULL AND p.proargtypes::text <> ''
+                    THEN regexp_replace ( regexp_replace ( p.proargtypes::text, '[^ ]+', 'i', 'g' ), '[ ]+', ',', 'g' )
+                END AS in_arg_modes,
+            CASE
+                WHEN p.prorettype IS NOT NULL AND p.prorettype::text <> ''
+                    THEN p.prorettype::text
+                END AS ret_arg_type,
+            CASE
+                WHEN t.typname IS NOT NULL AND t.typname::text <> ''
+                    THEN t.typname::text
+                END AS ret_arg_name
         FROM pg_catalog.pg_proc p
         JOIN pg_catalog.pg_namespace n
             ON n.oid = p.pronamespace
+        LEFT JOIN pg_catalog.pg_type t
+            ON ( t.oid = p.prorettype )
         CROSS JOIN args
         WHERE NOT p.proisagg
             AND NOT p.proiswindow
@@ -115,6 +159,33 @@ obj AS (
                 OR args.schema_name = '' )
             AND ( p.proname = args.obj_name
                 OR coalesce ( args.obj_name, '' ) = '' )
+),
+obj AS (
+    SELECT schema_name,
+            obj_name,
+            result_types,
+            argument_types,
+            description,
+            unnest ( proacl ) AS acl,
+            CASE
+                WHEN coalesce ( all_arg_types, '' ) <> '' THEN all_arg_types
+                WHEN coalesce ( in_arg_types, '' ) <> '' AND coalesce ( ret_arg_type, '' ) <> '' THEN in_arg_types || ',' || ret_arg_type
+                WHEN coalesce ( in_arg_types, '' ) <> '' THEN in_arg_types
+                WHEN coalesce ( ret_arg_type, '' ) <> '' THEN ret_arg_type
+                END AS arg_types,
+            CASE
+                WHEN coalesce ( all_arg_types, '' ) <> '' THEN all_arg_modes
+                WHEN coalesce ( in_arg_types, '' ) <> '' AND coalesce ( ret_arg_type, '' ) <> '' THEN in_arg_modes || ',o'
+                WHEN coalesce ( in_arg_types, '' ) <> '' THEN in_arg_modes
+                WHEN coalesce ( ret_arg_type, '' ) <> '' THEN 'o'
+                END AS arg_modes,
+            CASE
+                WHEN coalesce ( all_arg_types, '' ) <> '' THEN all_arg_names
+                WHEN coalesce ( in_arg_types, '' ) <> '' AND coalesce ( ret_arg_type, '' ) <> '' THEN all_arg_names || ',' || ret_arg_name
+                WHEN coalesce ( in_arg_types, '' ) <> '' THEN all_arg_names
+                WHEN coalesce ( ret_arg_type, '' ) <> '' THEN ret_arg_name
+                END AS arg_names
+        FROM proc
 )
 SELECT obj.schema_name,
         obj.obj_name,
@@ -122,9 +193,9 @@ SELECT obj.schema_name,
         coalesce ( obj.argument_types, '' ) AS argument_types,
         coalesce ( regexp_replace ( regexp_replace ( obj.acl::text, '^[^=]+=', '' ), '[/].+', '' ), '' ) AS privs,
         coalesce ( obj.description, '' ) AS description,
-        regexp_replace ( obj.arg_types, '[{}]', '' ) AS arg_types,
-        regexp_replace ( obj.arg_modes, '[{}]', '' ) AS arg_modes,
-        regexp_replace ( obj.arg_names, '[{}]', '' ) AS arg_names
+        arg_types,
+        arg_modes,
+        arg_names
     FROM obj
     CROSS JOIN args
     WHERE obj.acl::text LIKE args.username || '=%'
@@ -132,6 +203,9 @@ SELECT obj.schema_name,
         obj.obj_name,
         obj.argument_types
 `
+
+	//prorettype (oid)	proargtypes (oidvector)
+
 	rows, err := db.Query(q, schema, objName, user)
 	if err != nil {
 		return
@@ -175,7 +249,7 @@ func popTypeMeta(db *sql.DB, arg_type string) (u PgColumnMetadata, err error) {
 
 	q := `
 SELECT pg_catalog.format_type ( oid, null ) AS data_type,
-        ltrim ( typname, '_' ) AS type_name,
+        typname AS type_name,
         typcategory AS type_category
     FROM pg_catalog.pg_type
     WHERE oid::text = $1
