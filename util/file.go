@@ -12,7 +12,7 @@ type LineBuf struct {
 	ary []string
 }
 
-func InitLineBuf() *LineBuf {
+func NewLineBuf() *LineBuf {
 	var a LineBuf
 	return &a
 }
