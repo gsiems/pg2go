@@ -13,7 +13,6 @@ import (
 )
 
 type cArgs struct {
-	noNulls     bool
 	packageName string
 	schemaName  string
 	objName     string
@@ -29,7 +28,6 @@ func main() {
 
 	var args cArgs
 
-	flag.BoolVar(&args.noNulls, "no-nulls", false, "Use only go datatypes in structures.")
 	flag.StringVar(&args.packageName, "package", "main", "The package name (defaults to main).")
 
 	flag.StringVar(&args.schemaName, "schema", "", "The database schema to generate structs for (defaults to all).")
@@ -63,21 +61,162 @@ func main() {
 
 	types, err := m.GetTypeMetas(dbPool, args.schemaName, args.objName, args.appUser)
 	u.DieOnErrf("FAILED! %q.\n", err)
-	genTypeStructs(args, types)
+	err = genTypeCode(args, types)
+	u.DieOnErrf("FAILED! %q.\n", err)
 
 	tables, err := m.GetTableMetas(dbPool, args.schemaName, args.objName, args.appUser)
 	u.DieOnErrf("FAILED! %q.\n", err)
-	genTableCode(args, tables)
+	err = genTableCode(args, tables)
+	u.DieOnErrf("FAILED! %q.\n", err)
 
 	funcs, err := m.GetFunctionMetas(dbPool, args.schemaName, args.objName, args.appUser)
 	u.DieOnErrf("FAILED! %q.\n", err)
-	genFunctionStructs(args, funcs)
+	err = genFunctionCode(args, funcs)
+	u.DieOnErrf("FAILED! %q.\n", err)
 
 }
 
-func initCodeBuf(args cArgs) (cb *u.LineBuf) {
+func genTypeCode(args cArgs, d []m.PgUsertypeMetadata) (err error) {
 
-	cb = u.InitLineBuf()
+	/*
+		If no schema was specified in the calling args then we can
+		potentially get duplicate structures. We *could* join the
+		schema name and type name for creating the structure name
+		however there is the issue of not fully qualifying references
+		to the type in the Postgresql code (either because it is in the
+		same schema or is in the search_path)-- this could be mitigated
+		by linking by type OIDs rather than type names...
+	*/
+	seen := make(map[string]int)
+
+	for _, f := range d {
+
+		if len(f.Columns) == 0 {
+			continue
+		}
+
+		// ensure the structure has not been generated already
+		_, ok := seen[f.StructName]
+		if ok {
+			continue
+		}
+		seen[f.StructName] = 1
+
+		cb := u.NewLineBuf()
+
+		appendHeader(args, cb)
+
+		errq := genTypeStruct(args, f, cb)
+		if errq != nil {
+			fmt.Printf("Failed to generate code for type %q.%q\n", f.SchemaName, f.ObjName)
+			continue
+		}
+
+		u.WriteFile(args.packageName, f.StructName, cb)
+	}
+
+	return
+}
+
+func genTableCode(args cArgs, d []m.PgTableMetadata) (err error) {
+
+	/*
+		If no schema was specified in the calling args then we can
+		potentially get duplicate structures. We *could* join the
+		schema name and table name for creating the structure name
+		however there is the issue of not fully qualifying references
+		to the type in the Postgresql code (either because it is in the
+		same schema or is in the search_path)
+	*/
+	seen := make(map[string]int)
+
+	for _, f := range d {
+
+		if len(f.Columns) == 0 {
+			continue
+		}
+
+		// ensure the structure has not been generated already
+		_, ok := seen[f.StructName]
+		if ok {
+			continue
+		}
+		seen[f.StructName] = 1
+
+		cb := u.NewLineBuf()
+
+		appendHeader(args, cb)
+
+		errq := genTableStruct(args, f, cb)
+		if errq != nil {
+			fmt.Printf("Failed to generate code for table %q.%q\n", f.SchemaName, f.ObjName)
+			continue
+		}
+
+		/*
+		   a -> insert
+		   r -> select
+		   w -> update
+		   d -> delete
+		*/
+
+		//err = genTableSelectList(args, f, cb)
+		//if err != nil {
+		//	return
+		//}
+
+		u.WriteFile(args.packageName, f.StructName, cb)
+	}
+	return
+}
+
+func genFunctionCode(args cArgs, d []m.PgFunctionMetadata) (err error) {
+	/*
+		If no schema was specified in the calling args then we can
+		potentially get duplicate structures. We *could* join the
+		schema name and function name for creating the structure name
+		however there is the issue of not fully qualifying references
+		to the type in the Postgresql code (either because it is in the
+		same schema or is in the search_path). It is also possible to
+		have duplicated structures if there is functional overloading
+		in the database... Another problem is if a function returns a
+		TABLE that matches an exiting table or view as it is unknown
+		how to cleanly/automatically recognize that the table/view
+		struct is the same as the function struct.
+	*/
+	seen := make(map[string]int)
+
+	for _, f := range d {
+
+		// Functions with zero or one return arguments don't require a struct
+		if len(f.ResultColumns) < 2 {
+			continue
+		}
+
+		// ensure the structure has not been generated already
+		_, ok := seen[f.StructName]
+		if ok {
+			continue
+		}
+		seen[f.StructName] = 1
+
+		cb := u.NewLineBuf()
+
+		appendHeader(args, cb)
+
+		errq := genFunctionStruct(args, f, cb)
+		if errq != nil {
+			fmt.Printf("Failed to generate code for function %q.%q\n", f.SchemaName, f.ObjName)
+			continue
+		}
+
+		u.WriteFile(args.packageName, fmt.Sprintf("f%s", f.StructName), cb)
+	}
+	return
+}
+
+func appendHeader(args cArgs, cb *u.LineBuf) {
+
 	cb.Append(fmt.Sprintf("package %s", args.packageName))
 	cb.Append("")
 
@@ -99,179 +238,66 @@ func initCodeBuf(args cArgs) (cb *u.LineBuf) {
 	cb.Append("\t\"database/sql\"")
 	cb.Append("\t\"time\"")
 	cb.Append("")
+	cb.Append("\t\"github.com/jackc/pgtype\"")
 	cb.Append("\t_ \"github.com/lib/pq\"")
 	cb.Append(")")
 	cb.Append("")
 
-	return cb
 }
 
-func genTypeStructs(args cArgs, d []m.PgUsertypeMetadata) {
+func genTypeStruct(args cArgs, f m.PgUsertypeMetadata, cb *u.LineBuf) (err error) {
 
-	for _, f := range d {
-
-		if len(f.Columns) == 0 {
-			continue
-		}
-
-		cb := initCodeBuf(args)
-
-		cb.Append(fmt.Sprintf("// %s struct for the %s.%s %s type", f.StructName, f.SchemaName, f.ObjName, f.ObjType))
-		if f.Description != "" {
-			cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
-		}
-		cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
-
-		cb.Append(m.GetStructStanzas(args.noNulls, false, f.Columns))
-
-		cb.Append("}")
-		cb.Append("")
-
-		u.WriteFile(args.packageName, f.StructName, cb)
+	var stanza string
+	stanza, err = m.GetStructStanzas(f.Columns)
+	if err != nil {
+		return
 	}
-}
 
-func genTableCode(args cArgs, d []m.PgTableMetadata) {
-
-	// If no app user was specified then we can potentially get dulplicate structures
-	seen := make(map[string]int)
-
-	for _, f := range d {
-
-		if len(f.Columns) == 0 {
-			continue
-		}
-
-		// ensure the structure has not been generated already
-		_, ok := seen[f.StructName]
-		if ok {
-			continue
-		}
-		seen[f.StructName] = 1
-
-		cb := initCodeBuf(args)
-
-		genTableStruct(args, f, cb)
-
-		/*
-		   a -> insert
-		   r -> select
-		   w -> update
-		   d -> delete
-		*/
-
-		genTableSelectList(args, f, cb)
-
-		u.WriteFile(args.packageName, f.StructName, cb)
+	cb.Append(fmt.Sprintf("// %s struct for the %s.%s %s type", f.StructName, f.SchemaName, f.ObjName, f.ObjType))
+	if f.Description != "" {
+		cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
 	}
-}
-
-func genTableSelectList(args cArgs, f m.PgTableMetadata, cb *u.LineBuf) {
-
-	goFuncName := fmt.Sprintf("List%s", f.StructName)
-
+	cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
+	cb.Append(stanza)
+	cb.Append("}")
 	cb.Append("")
-	cb.Append(fmt.Sprintf("// %s returns the data from the %s.%s %s", goFuncName, f.SchemaName, f.ObjName, f.ObjType))
-	cb.Append(fmt.Sprintf("func (db *DB) %s() (d []%s, err error) {", goFuncName, f.StructName))
-
-	if args.noNulls {
-		cb.Append("\tvar u []struct {")
-		cb.Append(m.GetStructStanzas(args.noNulls, true, f.Columns))
-		cb.Append("\t}")
-
-		cb.Append("\terr = db.Select(&u, `")
-
-		var ary []string
-		for _, col := range f.Columns {
-			ary = append(ary, col.ColumnName)
-		}
-		cb.Append(fmt.Sprintf("SELECT %s", strings.Join(ary, ",\n        ")))
-		cb.Append(fmt.Sprintf("    FROM %s.%s`,", f.SchemaName, f.ObjName))
-		cb.Append("\t)")
-
-		cb.Append("\tfor _, rec := range u {")
-		cb.Append(fmt.Sprintf("\t\td = append(d, %s{", f.StructName))
-
-		for _, col := range f.Columns {
-			goVarName := u.ToUpperCamelCase(col.ColumnName)
-			strucVarType := u.ToIntVarType(col.DataType)
-			cb.Append(fmt.Sprintf("\t\t\t%s: rec.%s.%s,", goVarName, goVarName, strucVarType))
-		}
-
-		cb.Append("\t\t})")
-		cb.Append("\t}")
-		cb.Append("\treturn")
-		cb.Append("}")
-		cb.Append("")
-
-	} else {
-		cb.Append("\terr = db.Select(&d, `")
-
-		var ary []string
-		for _, col := range f.Columns {
-			ary = append(ary, col.ColumnName)
-		}
-		cb.Append(fmt.Sprintf("SELECT %s", strings.Join(ary, ",\n        ")))
-		cb.Append(fmt.Sprintf("    FROM %s.%s`,", f.SchemaName, f.ObjName))
-		cb.Append("\t)")
-		cb.Append("\treturn")
-		cb.Append("}")
-		cb.Append("")
-	}
-
 	return
 }
 
-func genTableStruct(args cArgs, f m.PgTableMetadata, cb *u.LineBuf) {
+func genTableStruct(args cArgs, f m.PgTableMetadata, cb *u.LineBuf) (err error) {
+	var stanza string
+	stanza, err = m.GetStructStanzas(f.Columns)
+	if err != nil {
+		return
+	}
 
 	cb.Append(fmt.Sprintf("// %s struct for the %s.%s %s", f.StructName, f.SchemaName, f.ObjName, f.ObjType))
 	if f.Description != "" {
 		cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
 	}
 	cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
+	cb.Append(stanza)
+	cb.Append("}")
+	cb.Append("")
+	return
+}
 
-	cb.Append(m.GetStructStanzas(args.noNulls, false, f.Columns))
+func genFunctionStruct(args cArgs, f m.PgFunctionMetadata, cb *u.LineBuf) (err error) {
 
+	var stanza string
+	stanza, err = m.GetStructStanzas(f.ResultColumns)
+	if err != nil {
+		return
+	}
+
+	cb.Append(fmt.Sprintf("// %s struct for the result set from the %s.%s function", f.StructName, f.SchemaName, f.ObjName))
+	if f.Description != "" {
+		cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
+	}
+	cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
+	cb.Append(stanza)
 	cb.Append("}")
 	cb.Append("")
 
-}
-
-func genFunctionStructs(args cArgs, d []m.PgFunctionMetadata) {
-
-	// If no app user was specified then we can potentially get
-	// duplicate structures. It is also possible to have duplicated
-	// structures if there is functional overloading in the database.
-	seen := make(map[string]int)
-
-	for _, f := range d {
-
-		if len(f.ResultColumns) == 0 {
-			continue
-		}
-
-		// ensure the structure has not been generated already
-		_, ok := seen[f.StructName]
-		if ok {
-			continue
-		}
-		seen[f.StructName] = 1
-
-		cb := initCodeBuf(args)
-
-		cb.Append(fmt.Sprintf("// %s struct for the result set from the %s.%s function\n", f.StructName, f.SchemaName, f.ObjName))
-		if f.Description != "" {
-			cb.Append(fmt.Sprintf("// %s", strings.ReplaceAll(f.Description, "\n", "\n// ")))
-		}
-
-		cb.Append(fmt.Sprintf("type %s struct {", f.StructName))
-
-		cb.Append(m.GetStructStanzas(args.noNulls, false, f.ResultColumns))
-
-		cb.Append("}")
-		cb.Append("")
-
-		u.WriteFile(args.packageName, fmt.Sprintf("f%s", f.StructName), cb)
-
-	}
+	return
 }
