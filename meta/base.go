@@ -1,21 +1,23 @@
 package meta
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
+	_ "github.com/lib/pq"
+
 	u "github.com/gsiems/pg2go/util"
-	"github.com/jmoiron/sqlx"
 )
 
 // DB contains an sqlx database connection
 type DB struct {
-	*sqlx.DB
+	*sql.DB
 }
 
 // OpenDB opens a database connection and returns a DB reference.
 func OpenDB(dsn string) (*DB, error) {
-	db, err := sqlx.Open("postgres", dsn)
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -27,44 +29,46 @@ func (db *DB) CloseDB() error {
 	return db.DB.Close()
 }
 
-func GetStructStanzas(noNulls, internal bool, cols []PgColumnMetadata) string {
+func GetStructStanzas(noNulls, internal bool, cols []PgColumnMetadata) (s string, err error) {
 
 	var ary []string
-	maxDbNameLen, maxVarNameLen, maxVarTypeLen := getMaxLens(noNulls, cols)
-
-	for _, col := range cols {
-		if internal {
-			stanza := makeQueryStanza(noNulls, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
-			ary = append(ary, stanza)
-		} else {
-			stanza := makePublicStanza(noNulls, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
-			ary = append(ary, stanza)
-		}
+	maxDbNameLen, maxVarNameLen, maxVarTypeLen, err := getMaxLens(noNulls, cols)
+	if err != nil {
+		return
 	}
-	return strings.Join(ary, "\n")
+
+	var stanza string
+	for _, col := range cols {
+		stanza, err = makeStructStanza(noNulls, col, maxDbNameLen, maxVarNameLen, maxVarTypeLen)
+		if err != nil {
+			return
+		}
+		ary = append(ary, stanza)
+	}
+	s = strings.Join(ary, "\n")
+	return
 }
 
-func makePublicStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
+func makeStructStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) (s string, err error) {
 
 	var ary []string
 
 	goVarName := u.ToUpperCamelCase(col.ColumnName)
 	jsonName := u.ToLowerCamelCase(col.ColumnName)
 
-	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
-	VarTypeToken := ""
-	if noNulls {
-		VarTypeToken = u.Lpad(u.ToGoVarType(col.DataType), maxVarTypeLen+1)
-	} else {
-		VarTypeToken = u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
+	var varType string
+	varType, err = TranslateType(col.TypeName)
+	if err != nil {
+		err = fmt.Errorf("makeStructStanza - %s: %s", col.ColumnName, err)
+		return
 	}
 
 	JSONToken := u.Lpad("`json:\""+jsonName+"\"", maxVarNameLen+9)
 	DbToken := u.Lpad("db:\""+col.ColumnName+"\"`", maxDbNameLen+6)
 
 	ary = append(ary, "\t")
-	ary = append(ary, VarNameToken)
-	ary = append(ary, VarTypeToken)
+	ary = append(ary, u.Lpad(goVarName, maxVarNameLen+1))
+	ary = append(ary, u.Lpad(varType, maxVarTypeLen+1))
 	ary = append(ary, JSONToken)
 	ary = append(ary, DbToken)
 	ary = append(ary, " // [")
@@ -82,37 +86,24 @@ func makePublicStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNa
 		ary = append(ary, fmt.Sprintf(" %s", strings.ReplaceAll(col.Description, "\n", "\n//                                           ")))
 	}
 
-	return strings.Join(ary, "")
+	s = strings.Join(ary, "")
+	return
 }
 
-func makeQueryStanza(noNulls bool, col PgColumnMetadata, maxDbNameLen, maxVarNameLen, maxVarTypeLen int) string {
+func getMaxLens(noNulls bool, cols []PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int, err error) {
 
-	var ary []string
-
-	goVarName := u.ToUpperCamelCase(col.ColumnName)
-
-	VarNameToken := u.Lpad(goVarName, maxVarNameLen+1)
-	VarTypeToken := u.Lpad(u.ToNullVarType(col.DataType), maxVarTypeLen+1)
-
-	ary = append(ary, "\t\t")
-	ary = append(ary, VarNameToken)
-	ary = append(ary, VarTypeToken)
-
-	return strings.Join(ary, "")
-}
-
-func getMaxLens(noNulls bool, cols []PgColumnMetadata) (maxDbNameLen, maxVarNameLen, maxVarTypeLen int) {
 	for _, col := range cols {
 		goVarName := u.ToUpperCamelCase(col.ColumnName)
 		maxDbNameLen = maxStringLen(col.ColumnName, maxDbNameLen)
 		maxVarNameLen = maxStringLen(goVarName, maxVarNameLen)
 
-		if noNulls {
-			maxVarTypeLen = maxStringLen(u.ToGoVarType(col.DataType), maxVarTypeLen)
-		} else {
-			maxVarTypeLen = maxStringLen(u.ToNullVarType(col.DataType), maxVarTypeLen)
+		var varType string
+		varType, err = TranslateType(col.TypeName)
+		if err != nil {
+			err = fmt.Errorf("getMaxLens - %s: %s", col.ColumnName, err)
+			return
 		}
-
+		maxVarTypeLen = maxStringLen(varType, maxVarTypeLen)
 	}
 	return
 }
