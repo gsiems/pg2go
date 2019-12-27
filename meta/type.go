@@ -22,7 +22,13 @@ type PgUsertypeMetadata struct {
 // GetTypeMetas returns the metadata for the avaiable user types
 func GetTypeMetas(db *sql.DB, schema, objName, user string) (types []PgUsertypeMetadata, err error) {
 
-	types, errq := listTypeMetas(db, schema, objName)
+	errq := mapOidToType(db)
+	if errq != nil {
+		err = fmt.Errorf("Expected oid to type mapping, got error: %q", errq)
+		return
+	}
+
+	types, errq = listTypeMetas(db, schema, objName)
 	if errq != nil {
 		err = fmt.Errorf("Expected type metadata, got error: %q", errq)
 		return
@@ -119,7 +125,7 @@ cols AS (
             pg_catalog.format_type ( tt.oid, NULL ) AS obj_name,
             a.attname::text AS column_name,
             pg_catalog.format_type ( a.atttypid, a.atttypmod ) AS data_type,
-            ltrim ( tc.typname, '_' ) AS type_name,
+            tc.typname AS type_name,
             tc.typcategory AS type_category,
             a.attnotnull AS is_required,
             a.attnum AS ordinal_position,
@@ -174,6 +180,57 @@ SELECT cols.column_name,
 		}
 
 		d = append(d, u)
+	}
+
+	return
+}
+
+// mapOidToType
+func mapOidToType(db *sql.DB) (err error) {
+
+	q := `
+SELECT t.oid,
+        n.nspname::text AS schema_name,
+        t.typname::text AS type_name,
+        coalesce ( bt.oid, 0 ) AS base_oid,
+        coalesce ( bt.typname::text, '' ) AS base_type_name,
+        t.typtype AS type_type,
+        t.typcategory AS type_category
+    FROM pg_catalog.pg_type t
+    JOIN pg_catalog.pg_namespace n
+        ON n.oid = t.typnamespace
+    LEFT JOIN pg_catalog.pg_type bt
+        ON ( bt.oid = t.typbasetype )
+    WHERE 1 = 1
+        AND n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_toast'
+        AND t.typtype NOT IN ( 'p' )
+        AND NOT ( t.typtype = 'c'
+            AND n.nspname = 'pg_catalog' )
+`
+
+	rows, err := db.Query(q)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u pgType
+
+		err = rows.Scan(&u.oid,
+			&u.schemaName,
+			&u.typeName,
+			&u.baseOid,
+			&u.baseTypeName,
+			&u.typeType,
+			&u.typeCategory,
+		)
+		if err != nil {
+			return
+		}
+
+		addOidToType(u.oid, &u)
 	}
 
 	return
