@@ -138,7 +138,7 @@ cols AS (
             c.relname::text AS obj_name,
             a.attname::text AS column_name,
             pg_catalog.format_type ( a.atttypid, a.atttypmod ) AS data_type,
-            ltrim ( t.typname, '_' ) AS type_name,
+            t.typname AS type_name,
             t.typcategory AS type_category,
             a.attnotnull AS is_required,
             a.attnum AS ordinal_position,
