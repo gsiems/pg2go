@@ -204,8 +204,6 @@ SELECT obj.schema_name,
         obj.argument_types
 `
 
-	//prorettype (oid)	proargtypes (oidvector)
-
 	rows, err := db.Query(q, schema, objName, user)
 	if err != nil {
 		return
