@@ -30,7 +30,7 @@ WITH args AS (
 SELECT n.nspname::text AS schema_name,
         t.typname::text AS obj_name,
         pg_catalog.format_type ( t.typbasetype, t.typtypmod ) AS data_type,
-        ltrim ( tc.typname, '_' ) AS type_name,
+        tc.typname AS type_name,
         tc.typcategory AS type_category,
         t.typnotnull AS is_required,
         coalesce ( d.description, '' ) AS description
@@ -43,13 +43,14 @@ SELECT n.nspname::text AS schema_name,
         ON ( d.classoid = t.tableoid
             AND d.objoid = t.oid
             AND d.objsubid = 0 )
+    CROSS JOIN args
     WHERE t.typtype = 'd'
         AND n.nspname <> 'pg_catalog'
         AND n.nspname <> 'information_schema'
         AND n.nspname !~ '^pg_toast'
-        AND ( n.nspname = args.schema_name
+        AND ( n.nspname::text = args.schema_name
             OR args.schema_name = '' )
-        AND ( obj.obj_name = args.obj_name
+        AND ( t.typname::text = args.obj_name
             OR coalesce ( args.obj_name, '' ) = '' )
 `
 
@@ -74,6 +75,8 @@ SELECT n.nspname::text AS schema_name,
 		}
 
 		d = append(d, u)
+
+		addUserDomain(u.ObjName, u.TypeName)
 	}
 
 	return
