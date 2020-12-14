@@ -22,7 +22,7 @@ type PgTableMetadata struct {
 }
 
 // GetTableMetas returns the metadata for the avaiable tables/views
-func GetTableMetas(db *sql.DB, schema, objName, user string) (tables []PgTableMetadata, err error) {
+func GetTableMetas(db *sql.DB, schema, objName, user string, pgVersion int) (tables []PgTableMetadata, err error) {
 
 	tables, errq := listTableMetas(db, schema, objName, user)
 	if errq != nil {
@@ -68,8 +68,16 @@ obj AS (
                 WHEN 'p' THEN 'table'
                 END AS obj_type,
             pg_catalog.obj_description(c.oid, 'pg_class') AS description,
-            unnest ( c.relacl ) AS acl
+            coalesce ( a.acl::text, '' ) AS acl
         FROM pg_catalog.pg_class c
+        -- Add left join to acl to deal with relationships that have no acl not being in the result set
+        LEFT JOIN (
+            SELECT oid,
+                    unnest ( relacl ) AS acl
+                FROM pg_catalog.pg_class
+                WHERE relkind IN ( 'r', 'v', 'm', 'S', 's', 'f', 'p', '' )
+            ) a
+            ON ( a.oid = c.oid )
         JOIN pg_catalog.pg_namespace n
             ON n.oid = c.relnamespace
         CROSS JOIN args
@@ -83,17 +91,21 @@ obj AS (
 )
 -- when no user is specified then we get potential duplicates based on
 -- how many users have privs to the object
-SELECT obj.schema_name,
+SELECT DISTINCT obj.schema_name,
         obj.obj_name,
         obj.obj_kind,
         obj.obj_type,
-        regexp_replace ( regexp_replace ( obj.acl::text, '^[^=]+=', '' ), '[/].+', '' ) AS privs,
+        CASE
+            WHEN args.username = '' THEN ''
+            ELSE regexp_replace ( regexp_replace ( obj.acl, '^[^=]+=', '' ), '[/].+', '' )
+            END AS privs,
         coalesce ( obj.description, '' ) AS description
     FROM obj
     CROSS JOIN args
     WHERE ( obj.obj_name = args.obj_name
             OR coalesce ( args.obj_name, '' ) = '' )
-        AND ( obj.acl::text LIKE args.username || '=%' )
+        AND ( obj.acl LIKE args.username || '=%'
+             OR args.username = '' )
     ORDER BY obj.schema_name,
         obj.obj_name,
         obj.obj_type

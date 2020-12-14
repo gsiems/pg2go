@@ -20,7 +20,7 @@ type PgUsertypeMetadata struct {
 }
 
 // GetTypeMetas returns the metadata for the avaiable user types
-func GetTypeMetas(db *sql.DB, schema, objName, user string) (types []PgUsertypeMetadata, err error) {
+func GetTypeMetas(db *sql.DB, schema, objName, user string, pgVersion int) (types []PgUsertypeMetadata, err error) {
 
 	errq := mapOidToType(db)
 	if errq != nil {

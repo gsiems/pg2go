@@ -32,7 +32,7 @@ func main() {
 
 	flag.StringVar(&args.schemaName, "schema", "", "The database schema to generate structs for (defaults to all).")
 	flag.StringVar(&args.objName, "objects", "", "The comma-separated list of the database objects to generate a structs for (defaults to all).")
-	flag.StringVar(&args.appUser, "app-user", "", "The name of the application user (required). Only code for those objects that this user has privileges for will be generated.")
+	flag.StringVar(&args.appUser, "app-user", "", "The name of the application user. If specified then only code for those objects that this user has privileges for will be generated.")
 
 	flag.StringVar(&args.dbName, "database", "", "The name of the database to connect to (required).")
 	flag.StringVar(&args.dbHost, "host", "localhost", "The database host to connect to.")
@@ -45,7 +45,7 @@ func main() {
 		flag.PrintDefaults()
 	}
 
-	if args.dbUser == "" || args.dbName == "" || args.dbHost == "" || args.appUser == "" {
+	if args.dbUser == "" || args.dbName == "" || args.dbHost == "" {
 		fmt.Println("Insufficient connections parameters specified.")
 		flag.PrintDefaults()
 	}
@@ -59,17 +59,23 @@ func main() {
 	err = dbPool.Ping()
 	u.DieOnErrf("Expected database ping, got error %q.\n", err)
 
-	types, err := m.GetTypeMetas(dbPool, args.schemaName, args.objName, args.appUser)
+	var pgVersion int
+	pgVersion, err = m.DbVersion(dbPool)
+	if err != nil {
+		u.DieOnErrf("Expected database version, got error %q.\n", err)
+	}
+
+	types, err := m.GetTypeMetas(dbPool, args.schemaName, args.objName, args.appUser, pgVersion)
 	u.DieOnErrf("FAILED! %q.\n", err)
 	err = genTypeCode(args, types)
 	u.DieOnErrf("FAILED! %q.\n", err)
 
-	tables, err := m.GetTableMetas(dbPool, args.schemaName, args.objName, args.appUser)
+	tables, err := m.GetTableMetas(dbPool, args.schemaName, args.objName, args.appUser, pgVersion)
 	u.DieOnErrf("FAILED! %q.\n", err)
 	err = genTableCode(args, tables)
 	u.DieOnErrf("FAILED! %q.\n", err)
 
-	funcs, err := m.GetFunctionMetas(dbPool, args.schemaName, args.objName, args.appUser)
+	funcs, err := m.GetFunctionMetas(dbPool, args.schemaName, args.objName, args.appUser, pgVersion)
 	u.DieOnErrf("FAILED! %q.\n", err)
 	err = genFunctionCode(args, funcs)
 	u.DieOnErrf("FAILED! %q.\n", err)

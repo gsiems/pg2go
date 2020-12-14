@@ -18,7 +18,7 @@ type PgDomainMetadata struct {
 }
 
 // GetDomainMetas returns the metadata for the avaiable domains
-func GetDomainMetas(db *sql.DB, schema, objName, user string) (d []PgDomainMetadata, err error) {
+func GetDomainMetas(db *sql.DB, schema, objName, user string, pgVersion int) (d []PgDomainMetadata, err error) {
 
 	var u PgDomainMetadata
 
