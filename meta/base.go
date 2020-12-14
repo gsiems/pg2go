@@ -29,6 +29,20 @@ func (db *DB) CloseDB() error {
 	return db.DB.Close()
 }
 
+func DbVersion(db *sql.DB) (v int, err error) {
+
+	rows, err := db.Query("SELECT current_setting('server_version_num')::int")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	rows.Next()
+	err = rows.Scan(&v)
+	return v, err
+}
+
+
 func GetStructStanzas(cols []PgColumnMetadata) (s string, err error) {
 
 	var ary []string
